@@ -5,7 +5,7 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
         const Self = @This();
         in_features: usize = I,
         out_features: usize = O,
-        weight: [I * O]f32,
+        weight: [I * O]f32, // Weights must be provided in *column major* order!
         bias: [O]f32,
 
         pub fn init(weight: *[I * O]f32, bias: *[O]f32) Self {
@@ -17,12 +17,10 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
             const batch_size = inputs.len / I;
             var outputs = try allocator.alloc(f32, batch_size * self.out_features);
             for (0..batch_size) |b| {
-                // TODO(eugenhotaj): We should store the weights in column-major order
-                // to improve cache locality.
                 for (0..O) |o| {
                     var sum: f32 = 0.0;
                     for (0..I) |i| {
-                        sum += inputs[b * I + i] * self.weight[i * O + o];
+                        sum += inputs[b * I + i] * self.weight[o * I + i];
                     }
                     outputs[b * O + o] = sum + self.bias[o];
                 }
