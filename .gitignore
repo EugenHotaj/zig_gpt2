@@ -2,3 +2,4 @@ zig-cache/
 zig-out/
 models/
 .venv/
+.DS_Store

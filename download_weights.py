@@ -41,12 +41,13 @@ weights_dir = f"{model}/raw"
 if not os.path.exists(weights_dir):
     os.makedirs(weights_dir)
     checkpoint = tf.train.load_checkpoint(model)
-    variables = sorted(list(checkpoint.get_variable_to_shape_map().keys()))
+    variables = sorted(list(checkpoint.get_variable_to_shape_map().keys()))[:10]
     with tqdm(
         ncols=100, desc=f"Dumping raw weights", total=len(variables), unit_scale=True
     ) as pbar:
         for name in variables:
-            tensor = checkpoint.get_tensor(name)
+            tensor = checkpoint.get_tensor(name).astype(np.float32).reshape(-1)
             fname = name.replace("/", "-")
-            np.savetxt(f"{weights_dir}/{fname}", tensor.reshape(-1))
+            with open(f"{weights_dir}/{fname}", "wb") as file_:
+                file_.write(tensor.tobytes())
             pbar.update(1)
