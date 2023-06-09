@@ -29,6 +29,17 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
     };
 }
 
+pub fn gelu(inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
+    var outputs = try allocator.alloc(f32, inputs.len);
+    for (0..inputs.len) |i| {
+        const x = inputs[i];
+        const z = std.math.sqrt(2.0 / std.math.pi);
+        const erf = std.math.tanh(z * (x + 0.044715 * std.math.pow(f32, x, 3.0)));
+        outputs[i] = 0.5 * x * (1.0 + erf);
+    }
+    return outputs;
+}
+
 pub fn load_tensor(path: []const u8, shape: []const usize, allocator: *const std.mem.Allocator) ![]f32 {
     var n_elements: usize = 4; // Using 4 since we're loading f32s (4 bytes).
     for (shape) |item| {
