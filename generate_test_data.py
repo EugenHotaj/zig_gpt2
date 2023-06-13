@@ -1,4 +1,5 @@
 import math
+import os
 
 import torch
 import torch.nn.functional as F
@@ -43,5 +44,6 @@ name_to_tensor.update({"softmax_inputs": inputs, "softmax_outputs": outputs})
 
 
 for name, tensor in name_to_tensor.items():
-    with open(f"models/test/{name}", "wb") as file_:
-        file_.write(tensor.reshape(-1).detach().numpy().tobytes())
+    if not os.path.exists(f"models/test/{name}"):
+        with open(f"models/test/{name}", "wb") as file_:
+            file_.write(tensor.reshape(-1).detach().numpy().tobytes())
