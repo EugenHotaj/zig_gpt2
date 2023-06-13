@@ -111,7 +111,7 @@ test "GELU" {
     );
     defer allocator.free(expected);
 
-    ops.gelu(&inputs);
+    ops.gelu(inputs);
     const actual = inputs;
 
     try expectTensorsApproxEqual(expected, actual);
@@ -137,7 +137,7 @@ test "Softmax" {
     );
     defer allocator.free(expected);
 
-    ops.softmax(batch_size, &inputs);
+    ops.softmax(batch_size, inputs);
     const actual = inputs;
 
     try expectTensorsApproxEqual(expected, actual);
