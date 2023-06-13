@@ -7,7 +7,7 @@ from torch import nn
 
 name_to_tensor = {}
 
-# Generate linear layer.
+# Generate Linear.
 linear = nn.Linear(in_features=5, out_features=10)
 inputs = torch.randn(3, 5)
 outputs = linear(inputs)
@@ -53,6 +53,20 @@ name_to_tensor.update(
         "embedding_weight": embedding.weight,
         "embedding_inputs": inputs,
         "embedding_outputs": outputs,
+    }
+)
+
+
+# Generate LayerNorm.
+layer_norm = nn.LayerNorm(5)
+inputs = torch.randn(3, 5)
+outputs = layer_norm(inputs)
+name_to_tensor.update(
+    {
+        "layer_norm_weight": layer_norm.weight,
+        "layer_norm_bias": layer_norm.bias,
+        "layer_norm_inputs": inputs,
+        "layer_norm_outputs": outputs,
     }
 )
 

@@ -91,6 +91,47 @@ test "Embedding" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
+test "LayerNorm" {
+    const batch_size = 3;
+    const in_features = 5;
+
+    const allocator = std.heap.page_allocator;
+    const weight = try ops.load_tensor(
+        "models/test/layer_norm_weight",
+        &[_]usize{ in_features, 1 },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(weight);
+    const bias = try ops.load_tensor(
+        "models/test/layer_norm_bias",
+        &[_]usize{in_features},
+        f32,
+        &allocator,
+    );
+    defer allocator.free(bias);
+    const inputs = try ops.load_tensor(
+        "models/test/layer_norm_inputs",
+        &[_]usize{ batch_size, in_features },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(inputs);
+    const expected = try ops.load_tensor(
+        "models/test/layer_norm_outputs",
+        &[_]usize{ batch_size, in_features },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected);
+
+    const layer_norm = ops.LayerNorm(in_features).init(weight, bias);
+    layer_norm.forward(inputs);
+    const actual = inputs;
+
+    try expectTensorsApproxEqual(expected, actual);
+}
+
 test "GELU" {
     const batch_size = 3;
     const in_features = 5;
@@ -137,7 +178,7 @@ test "Softmax" {
     );
     defer allocator.free(expected);
 
-    ops.softmax(batch_size, inputs);
+    ops.softmax(in_features, inputs);
     const actual = inputs;
 
     try expectTensorsApproxEqual(expected, actual);
