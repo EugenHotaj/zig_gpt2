@@ -3,11 +3,12 @@ import os
 
 import torch
 import torch.nn.functional as F
+from torch import nn
 
 name_to_tensor = {}
 
 # Generate linear layer.
-linear = torch.nn.Linear(in_features=5, out_features=10)
+linear = nn.Linear(in_features=5, out_features=10)
 inputs = torch.randn(3, 5)
 outputs = linear(inputs)
 name_to_tensor.update(
@@ -41,6 +42,19 @@ name_to_tensor.update({"gelu_inputs": inputs, "gelu_outputs": outputs})
 inputs = torch.randn(3, 5)
 outputs = F.softmax(inputs, dim=-1)
 name_to_tensor.update({"softmax_inputs": inputs, "softmax_outputs": outputs})
+
+
+# Generate Embedding.
+embedding = nn.Embedding(10, 5)
+inputs = torch.randint(0, 10, (3,))
+outputs = embedding(inputs)
+name_to_tensor.update(
+    {
+        "embedding_weight": embedding.weight,
+        "embedding_inputs": inputs,
+        "embedding_outputs": outputs,
+    }
+)
 
 
 for name, tensor in name_to_tensor.items():

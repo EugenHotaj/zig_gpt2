@@ -23,30 +23,69 @@ test "Linear" {
     const weight = try ops.load_tensor(
         "models/test/linear_weight",
         &[_]usize{ out_features, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(weight);
     const bias = try ops.load_tensor(
         "models/test/linear_bias",
         &[_]usize{out_features},
+        f32,
         &allocator,
     );
     defer allocator.free(bias);
     const inputs = try ops.load_tensor(
         "models/test/linear_inputs",
         &[_]usize{ batch_size, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/linear_outputs",
         &[_]usize{ batch_size, out_features },
+        f32,
         &allocator,
     );
     defer allocator.free(expected);
 
     const linear = ops.Linear(in_features, out_features).init(weight, bias);
     const actual = try linear.forward(inputs, &allocator);
+    defer allocator.free(actual);
+
+    try expectTensorsApproxEqual(expected, actual);
+}
+
+test "Embedding" {
+    const batch_size = 3;
+    const vocab_size = 10;
+    const embedding_dim = 5;
+
+    const allocator = std.heap.page_allocator;
+    const weight = try ops.load_tensor(
+        "models/test/embedding_weight",
+        &[_]usize{ vocab_size, embedding_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(weight);
+    const inputs = try ops.load_tensor(
+        "models/test/embedding_inputs",
+        &[_]usize{ batch_size, 1 },
+        usize,
+        &allocator,
+    );
+    defer allocator.free(inputs);
+    const expected = try ops.load_tensor(
+        "models/test/embedding_outputs",
+        &[_]usize{ batch_size, embedding_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected);
+
+    const embedding = ops.Embedding(embedding_dim).init(weight);
+    const actual = try embedding.forward(inputs, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -60,12 +99,14 @@ test "GELU" {
     var inputs = try ops.load_tensor(
         "models/test/gelu_inputs",
         &[_]usize{ batch_size, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/gelu_outputs",
         &[_]usize{ batch_size, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(expected);
@@ -84,12 +125,14 @@ test "Softmax" {
     var inputs = try ops.load_tensor(
         "models/test/softmax_inputs",
         &[_]usize{ batch_size, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/softmax_outputs",
         &[_]usize{ batch_size, in_features },
+        f32,
         &allocator,
     );
     defer allocator.free(expected);

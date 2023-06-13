@@ -1,10 +1,8 @@
 const std = @import("std");
 
-pub fn Linear(comptime I: usize, comptime O: usize) type {
+pub fn Linear(comptime in_features: usize, comptime out_features: usize) type {
     return struct {
         const Self = @This();
-        in_features: usize = I,
-        out_features: usize = O,
         weight: []const f32, // Weights must be provided in *column major* order!
         bias: []const f32,
 
@@ -13,18 +11,42 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
         }
 
         pub fn forward(self: Self, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
-            const batch_size = inputs.len / I;
-            var outputs = try allocator.alloc(f32, batch_size * self.out_features);
+            const batch_size = inputs.len / in_features;
+            var outputs = try allocator.alloc(f32, batch_size * out_features);
             for (0..batch_size) |b| {
-                for (0..O) |o| {
+                for (0..out_features) |o| {
                     var sum: f32 = 0.0;
-                    for (0..I) |i| {
-                        sum += inputs[b * I + i] * self.weight[o * I + i];
+                    for (0..in_features) |i| {
+                        sum += inputs[b * in_features + i] * self.weight[o * in_features + i];
                     }
-                    outputs[b * O + o] = sum + self.bias[o];
+                    outputs[b * out_features + o] = sum + self.bias[o];
                 }
             }
             return outputs;
+        }
+    };
+}
+
+pub fn Embedding(comptime embedding_dim: usize) type {
+    return struct {
+        const Self = @This();
+        weight: []const f32,
+
+        pub fn init(weight: []const f32) Self {
+            return Self{ .weight = weight };
+        }
+
+        pub fn forward(self: Self, idxs: []const usize, allocator: *const std.mem.Allocator) ![]f32 {
+            var embeddings = try allocator.alloc(f32, idxs.len * embedding_dim);
+            for (0..idxs) |i| {
+                const idx = idxs[i];
+                std.mem.copyForwards(
+                    f32,
+                    embeddings[i * embedding_dim .. (i + 1) * embedding_dim],
+                    self.weight[embedding_dim * idx .. embedding_dim * (idx + 1)],
+                );
+            }
+            return embeddings;
         }
     };
 }
@@ -62,8 +84,8 @@ pub fn gelu(inputs: *[]f32) void {
     }
 }
 
-pub fn load_tensor(path: []const u8, shape: []const usize, allocator: *const std.mem.Allocator) ![]f32 {
-    var n_elements: usize = 4; // Using 4 since we're loading f32s (4 bytes).
+pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: *const std.mem.Allocator) ![]dtype {
+    var n_elements: usize = @alignOf(dtype); // Using 4 since we're loading f32s (4 bytes).
     for (shape) |item| {
         n_elements *= item;
     }
@@ -73,5 +95,5 @@ pub fn load_tensor(path: []const u8, shape: []const usize, allocator: *const std
 
     var tensor = try allocator.alloc(u8, n_elements);
     _ = try fd.readAll(tensor);
-    return std.mem.bytesAsSlice(f32, @alignCast(@alignOf(f32), tensor));
+    return std.mem.bytesAsSlice(dtype, @alignCast(@alignOf(dtype), tensor));
 }
