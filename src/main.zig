@@ -29,6 +29,27 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
     };
 }
 
+/// Computes the softmax of the given tensor inplace. We assume tensor has shape
+/// [batch_size, D] and compute the softmax along D.
+pub fn softmax(batch_size: usize, tensor: *[]f32) void {
+    const n_features = tensor.len / batch_size;
+
+    // TODO(eugenhotaj): Vectorize these row-wise operations.
+    for (0..batch_size) |b| {
+        const max = std.mem.max(f32, tensor.*[(b * n_features) .. (b + 1) * n_features]);
+
+        var sum: f32 = 0.0;
+        for (0..n_features) |i| {
+            const idx = b * n_features + i;
+            tensor.*[idx] = std.math.exp(tensor.*[idx] - max);
+            sum += tensor.*[idx];
+        }
+        for (0..n_features) |i| {
+            tensor.*[b * n_features + i] /= sum;
+        }
+    }
+}
+
 pub fn gelu(inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
     var outputs = try allocator.alloc(f32, inputs.len);
     for (0..inputs.len) |i| {

@@ -1,6 +1,7 @@
 import math
 
 import torch
+import torch.nn.functional as F
 
 name_to_tensor = {}
 
@@ -8,7 +9,6 @@ name_to_tensor = {}
 linear = torch.nn.Linear(in_features=5, out_features=10)
 inputs = torch.randn(3, 5)
 outputs = linear(inputs)
-
 name_to_tensor.update(
     {
         "linear_weight": linear.weight,
@@ -33,8 +33,14 @@ def gelu(x):
 
 inputs = torch.randn(3, 5)
 outputs = gelu(inputs)
-
 name_to_tensor.update({"gelu_inputs": inputs, "gelu_outputs": outputs})
+
+
+# Generate softmax.
+inputs = torch.randn(3, 5)
+outputs = F.softmax(inputs, dim=-1)
+name_to_tensor.update({"softmax_inputs": inputs, "softmax_outputs": outputs})
+
 
 for name, tensor in name_to_tensor.items():
     with open(f"models/test/{name}", "wb") as file_:
