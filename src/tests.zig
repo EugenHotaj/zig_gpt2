@@ -57,7 +57,7 @@ test "GELU" {
     const in_features = 5;
 
     const allocator = std.heap.page_allocator;
-    const inputs = try ops.load_tensor(
+    var inputs = try ops.load_tensor(
         "models/test/gelu_inputs",
         &[_]usize{ batch_size, in_features },
         &allocator,
@@ -70,7 +70,8 @@ test "GELU" {
     );
     defer allocator.free(expected);
 
-    const actual = try ops.gelu(inputs, &allocator);
+    ops.gelu(&inputs);
+    const actual = inputs;
 
     try expectTensorsApproxEqual(expected, actual);
 }

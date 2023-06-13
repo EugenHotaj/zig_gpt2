@@ -50,15 +50,13 @@ pub fn softmax(batch_size: usize, tensor: *[]f32) void {
     }
 }
 
-pub fn gelu(inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
-    var outputs = try allocator.alloc(f32, inputs.len);
+pub fn gelu(inputs: *[]f32) void {
     for (0..inputs.len) |i| {
-        const x = inputs[i];
+        const x = inputs.*[i];
         const z = std.math.sqrt(2.0 / std.math.pi);
         const erf = std.math.tanh(z * (x + 0.044715 * std.math.pow(f32, x, 3.0)));
-        outputs[i] = 0.5 * x * (1.0 + erf);
+        inputs.*[i] = 0.5 * x * (1.0 + erf);
     }
-    return outputs;
 }
 
 pub fn load_tensor(path: []const u8, shape: []const usize, allocator: *const std.mem.Allocator) ![]f32 {
