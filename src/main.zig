@@ -29,7 +29,7 @@ pub fn Linear(comptime I: usize, comptime O: usize) type {
     };
 }
 
-/// Computes the softmax of the given tensor inplace. We assume tensor has shape
+/// Computes the (stable) softmax of the given tensor inplace. We assume tensor has shape
 /// [batch_size, D] and compute the softmax along D.
 pub fn softmax(batch_size: usize, tensor: *[]f32) void {
     const n_features = tensor.len / batch_size;
@@ -50,6 +50,9 @@ pub fn softmax(batch_size: usize, tensor: *[]f32) void {
     }
 }
 
+/// Computes the Gaussian Error Linear Unit (GELU) activation function on the given tensor inplace.
+/// Copied from the nanogpt repo and identical to OpenAI GPT2 implementation.
+/// Paper: https://arxiv.org/abs/1606.08415
 pub fn gelu(inputs: *[]f32) void {
     for (0..inputs.len) |i| {
         const x = inputs.*[i];
