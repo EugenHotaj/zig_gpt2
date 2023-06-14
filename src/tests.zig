@@ -132,7 +132,7 @@ test "LayerNorm" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
-test "GELU" {
+test "gelu" {
     const batch_size = 3;
     const in_features = 5;
 
@@ -158,7 +158,7 @@ test "GELU" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
-test "Softmax" {
+test "softmax" {
     const batch_size = 3;
     const in_features = 5;
 
@@ -180,6 +180,41 @@ test "Softmax" {
 
     ops.softmax(in_features, inputs);
     const actual = inputs;
+
+    try expectTensorsApproxEqual(expected, actual);
+}
+
+test "causal_self_attention" {
+    const batch_size = 2;
+    const n_heads = 3;
+    const seq_len = 5;
+    const head_dim = 4;
+
+    const allocator = std.heap.page_allocator;
+    const q = try ops.load_tensor(
+        "models/test/attn_q",
+        &[_]usize{ batch_size, n_heads, seq_len, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(q);
+    const k = try ops.load_tensor(
+        "models/test/attn_k",
+        &[_]usize{ batch_size, n_heads, seq_len, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(k);
+    const expected = try ops.load_tensor(
+        "models/test/attn_qk",
+        &[_]usize{ batch_size, n_heads, seq_len, seq_len },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected);
+
+    const actual = try ops.causal_self_attention(q, k, n_heads, seq_len, head_dim, &allocator);
+    defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
 }

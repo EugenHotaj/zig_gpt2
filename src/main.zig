@@ -122,6 +122,36 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
     }
 }
 
+pub fn causal_self_attention(
+    q: []const f32,
+    k: []const f32,
+    // v: []const f32,
+    n_heads: usize,
+    seq_len: usize,
+    head_dim: usize,
+    allocator: *const std.mem.Allocator,
+) ![]f32 {
+    const batch_size = k.len / (n_heads * seq_len * head_dim);
+
+    // Compute attention weights.
+    var attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
+    for (0..batch_size) |b| {
+        for (0..n_heads) |h| {
+            for (0..seq_len) |r| {
+                for (0..seq_len) |c| {
+                    var sum: f32 = 0.0;
+                    for (0..head_dim) |i| {
+                        const offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
+                        sum += q[offset + r * head_dim + i] * k[offset + c * head_dim + i];
+                    }
+                    const offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
+                    attn[offset + r * seq_len + c] = sum;
+                }
+            }
+        }
+    }
+    return attn;
+}
 pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: *const std.mem.Allocator) ![]dtype {
     var n_elements: usize = @alignOf(dtype);
     for (shape) |item| {

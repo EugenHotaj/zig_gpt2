@@ -70,6 +70,18 @@ name_to_tensor.update(
     }
 )
 
+q = torch.randn(2, 3, 5, 4)
+k = torch.randn(2, 3, 5, 4)
+qk = q @ k.transpose(-2, -1)
+
+name_to_tensor.update(
+    {
+        "attn_q": q,
+        "attn_k": k,
+        "attn_qk": qk,
+    }
+)
+
 
 for name, tensor in name_to_tensor.items():
     if not os.path.exists(f"models/test/{name}"):
