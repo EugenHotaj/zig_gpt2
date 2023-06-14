@@ -205,15 +205,23 @@ test "causal_self_attention" {
         &allocator,
     );
     defer allocator.free(k);
+    const v = try ops.load_tensor(
+        "models/test/attn_v",
+        &[_]usize{ batch_size, n_heads, seq_len, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(v);
+
     const expected = try ops.load_tensor(
-        "models/test/attn_qk",
-        &[_]usize{ batch_size, n_heads, seq_len, seq_len },
+        "models/test/attn_outputs",
+        &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
         &allocator,
     );
     defer allocator.free(expected);
 
-    const actual = try ops.causal_self_attention(q, k, n_heads, seq_len, head_dim, &allocator);
+    const actual = try ops.causal_self_attention(q, k, v, n_heads, seq_len, head_dim, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);

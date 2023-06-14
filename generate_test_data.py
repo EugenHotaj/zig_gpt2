@@ -70,15 +70,24 @@ name_to_tensor.update(
     }
 )
 
+
+# Generate attention.
 q = torch.randn(2, 3, 5, 4)
 k = torch.randn(2, 3, 5, 4)
-qk = q @ k.transpose(-2, -1)
+v = torch.randn(2, 3, 5, 4)
+mask = torch.tril(torch.ones(5, 5).view(1, 1, 5, 5))
+attn = q @ k.transpose(-2, -1) / math.sqrt(k.size(-1))
+attn = attn.masked_fill(mask[:, :, :5, :5] == 0, float("-inf"))
+attn = F.softmax(attn, dim=-1)
+outputs = attn @ v
+
 
 name_to_tensor.update(
     {
         "attn_q": q,
         "attn_k": k,
-        "attn_qk": qk,
+        "attn_v": v,
+        "attn_outputs": outputs,
     }
 )
 
