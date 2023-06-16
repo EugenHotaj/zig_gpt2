@@ -71,26 +71,31 @@ name_to_tensor.update(
 )
 
 
-# Generate attention.
-q = torch.randn(2, 3, 5, 4)
-k = torch.randn(2, 3, 5, 4)
-v = torch.randn(2, 3, 5, 4)
+# Generate causal self attention.
+batch_size, seq_len, n_head, head_dim = 3, 5, 3, 4
+n_embed = n_head * head_dim
+
+# Generate transpose intermediaries.
+inputs = torch.randn(batch_size, seq_len, n_head, head_dim)
+outputs = inputs.transpose(1, 2)
+name_to_tensor.update({"transpose_inputs": inputs, "transpose_outputs": outputs})
+
+# Generate causal self attention.
+c_attn = nn.Linear(in_features=n_embed, out_features=3 * n_embed)
+inputs = torch.randn(batch_size, seq_len, n_embed)
+outputs = c_attn(inputs)
+
+# Generate intermediaries from scaled dot product attention.
+q, k, v = outputs.split(n_embed, dim=2)
+q = q.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
+k = k.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
+v = v.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
 mask = torch.tril(torch.ones(5, 5).view(1, 1, 5, 5))
 attn = q @ k.transpose(-2, -1) / math.sqrt(k.size(-1))
 attn = attn.masked_fill(mask[:, :, :5, :5] == 0, float("-inf"))
 attn = F.softmax(attn, dim=-1)
 outputs = attn @ v
-
-
-name_to_tensor.update(
-    {
-        "attn_q": q,
-        "attn_k": k,
-        "attn_v": v,
-        "attn_outputs": outputs,
-    }
-)
-
+name_to_tensor.update({"sdpa_q": q, "sdpa_k": k, "sdpa_v": v, "sdpa_outputs": outputs})
 
 for name, tensor in name_to_tensor.items():
     if not os.path.exists(f"models/test/{name}"):

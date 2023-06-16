@@ -10,7 +10,7 @@ pub fn Linear(comptime in_features: usize, comptime out_features: usize) type {
             return Self{ .weight = weight, .bias = bias };
         }
 
-        pub fn forward(self: Self, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
+        pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
             const batch_size = inputs.len / in_features;
             var outputs = try allocator.alloc(f32, batch_size * out_features);
             for (0..batch_size) |b| {
@@ -89,6 +89,34 @@ pub fn LayerNorm(comptime n_features: usize) type {
     };
 }
 
+/// Computes the causal self attention of the given q, k, v tensors.
+pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, comptime head_dim: usize) type {
+    return struct {
+        const Self = @This();
+        const n_embed = n_heads * head_dim;
+        foo: i32,
+
+        pub fn init() Self {
+            return Self{};
+        }
+
+        pub fn transpose(inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+            const batch_size = inputs.len / (seq_len * n_embed);
+            var outputs = try allocator.alloc(f32, inputs.len);
+            for (0..batch_size) |b| {
+                for (0..n_heads) |h| {
+                    for (0..seq_len) |r| {
+                        const out_offset = (b * seq_len * n_embed) + (h * seq_len * head_dim) + (r * head_dim);
+                        const in_offset = (b * seq_len * n_embed) + (r * n_embed) + (h * head_dim);
+                        std.mem.copy(f32, outputs[out_offset .. out_offset + head_dim], inputs[in_offset .. in_offset + head_dim]);
+                    }
+                }
+            }
+            return outputs;
+        }
+    };
+}
+
 /// Computes the Gaussian Error Linear Unit (GELU) activation function on the given inputs
 /// tensor inplace. Copied from the nanogpt repo and identical to OpenAI GPT2 implementation.
 /// Paper: https://arxiv.org/abs/1606.08415
@@ -122,8 +150,9 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
     }
 }
 
+// TODO(eugenhotaj): Expose whether to apply causal attention masking as an argument.
 /// Computes the causal self attention of the given q, k, v tensors.
-pub fn causal_self_attention(
+pub fn scaled_dot_product_attention(
     q: []const f32,
     k: []const f32,
     v: []const f32,

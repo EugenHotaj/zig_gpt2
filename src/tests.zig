@@ -132,6 +132,34 @@ test "LayerNorm" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
+test "CausalSelfAttention.transpose" {
+    const batch_size = 3;
+    const n_heads = 3;
+    const seq_len = 5;
+    const head_dim = 4;
+
+    const allocator = std.heap.page_allocator;
+    var inputs = try ops.load_tensor(
+        "models/test/transpose_inputs",
+        &[_]usize{ batch_size, seq_len, n_heads, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(inputs);
+    var expected = try ops.load_tensor(
+        "models/test/transpose_outputs",
+        &[_]usize{ batch_size, n_heads, seq_len, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected);
+
+    const actual = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).transpose(inputs, &allocator);
+    defer allocator.free(actual);
+
+    try expectTensorsApproxEqual(expected, actual);
+}
+
 test "gelu" {
     const batch_size = 3;
     const in_features = 5;
@@ -184,7 +212,7 @@ test "softmax" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
-test "causal_self_attention" {
+test "scaled_dot_product_attention" {
     const batch_size = 2;
     const n_heads = 3;
     const seq_len = 5;
@@ -192,21 +220,21 @@ test "causal_self_attention" {
 
     const allocator = std.heap.page_allocator;
     const q = try ops.load_tensor(
-        "models/test/attn_q",
+        "models/test/sdpa_q",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
         &allocator,
     );
     defer allocator.free(q);
     const k = try ops.load_tensor(
-        "models/test/attn_k",
+        "models/test/sdpa_k",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
         &allocator,
     );
     defer allocator.free(k);
     const v = try ops.load_tensor(
-        "models/test/attn_v",
+        "models/test/sdpa_v",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
         &allocator,
@@ -214,14 +242,14 @@ test "causal_self_attention" {
     defer allocator.free(v);
 
     const expected = try ops.load_tensor(
-        "models/test/attn_outputs",
+        "models/test/sdpa_outputs",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
         &allocator,
     );
     defer allocator.free(expected);
 
-    const actual = try ops.causal_self_attention(q, k, v, n_heads, seq_len, head_dim, &allocator);
+    const actual = try ops.scaled_dot_product_attention(q, k, v, n_heads, seq_len, head_dim, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
