@@ -88,9 +88,16 @@ name_to_tensor.update(
 )
 
 
-c_attn = nn.Linear(in_features=n_embed, out_features=3 * n_embed)
 inputs = torch.randn(batch_size, seq_len, n_embed)
+c_attn = nn.Linear(in_features=n_embed, out_features=3 * n_embed)
 outputs = c_attn(inputs)
+name_to_tensor.update(
+    {
+        "attn_inputs": inputs,
+        "attn_c_attn_weight": c_attn.weight,
+        "attn_c_attn_bias": c_attn.bias,
+    }
+)
 
 # Generate intermediaries from scaled dot product attention.
 q, k, v = outputs.split(n_embed, dim=2)
@@ -103,6 +110,17 @@ attn = attn.masked_fill(mask[:, :, :5, :5] == 0, float("-inf"))
 attn = F.softmax(attn, dim=-1)
 outputs = attn @ v
 name_to_tensor.update({"sdpa_q": q, "sdpa_k": k, "sdpa_v": v, "sdpa_outputs": outputs})
+
+inputs = outputs.transpose(1, 2).contiguous().view(batch_size, seq_len, n_embed)
+c_proj = nn.Linear(n_embed, n_embed)
+outputs = c_proj(inputs)
+name_to_tensor.update(
+    {
+        "attn_c_proj_weight": c_proj.weight,
+        "attn_c_proj_bias": c_proj.bias,
+        "attn_outputs": outputs,
+    }
+)
 
 for name, tensor in name_to_tensor.items():
     if not os.path.exists(f"models/test/{name}"):

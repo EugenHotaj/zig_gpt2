@@ -94,10 +94,48 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
     return struct {
         const Self = @This();
         const n_embed = n_heads * head_dim;
-        foo: i32,
 
-        pub fn init() Self {
-            return Self{};
+        c_attn: Linear(n_embed, 3 * n_embed),
+        c_proj: Linear(n_embed, n_embed),
+
+        pub fn init(
+            c_attn_weight: []const f32,
+            c_attn_bias: []const f32,
+            c_proj_weight: []const f32,
+            c_proj_bias: []const f32,
+        ) Self {
+            const c_attn = Linear(n_embed, 3 * n_embed).init(c_attn_weight, c_attn_bias);
+            const c_proj = Linear(n_embed, n_embed).init(c_proj_weight, c_proj_bias);
+            return Self{ .c_attn = c_attn, .c_proj = c_proj };
+        }
+
+        pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+            const qkv = try self.c_attn.forward(inputs, allocator);
+            const q = try Self.transpose(
+                try Self.split_qkv(qkv, 0, allocator),
+                allocator,
+            );
+            const k = try Self.transpose(
+                try Self.split_qkv(qkv, 1, allocator),
+                allocator,
+            );
+            const v = try Self.transpose(
+                try Self.split_qkv(qkv, 2, allocator),
+                allocator,
+            );
+            const outputs = try Self.untranspose(
+                try scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    n_heads,
+                    seq_len,
+                    head_dim,
+                    allocator,
+                ),
+                allocator,
+            );
+            return self.c_proj.forward(outputs, allocator);
         }
 
         // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
@@ -129,6 +167,26 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
                     for (0..seq_len) |r| {
                         const out_offset = (b * seq_len * n_embed) + (h * seq_len * head_dim) + (r * head_dim);
                         const in_offset = (b * seq_len * n_embed) + (r * n_embed) + (h * head_dim);
+                        std.mem.copy(
+                            f32,
+                            outputs[out_offset .. out_offset + head_dim],
+                            inputs[in_offset .. in_offset + head_dim],
+                        );
+                    }
+                }
+            }
+            return outputs;
+        }
+
+        // Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
+        pub fn untranspose(inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+            const batch_size = inputs.len / (seq_len * n_embed);
+            var outputs = try allocator.alloc(f32, inputs.len);
+            for (0..batch_size) |b| {
+                for (0..seq_len) |r| {
+                    for (0..n_heads) |h| {
+                        const out_offset = (b * seq_len * n_embed) + (r * n_embed) + (h * head_dim);
+                        const in_offset = (b * seq_len * n_embed) + (h * seq_len * head_dim) + (r * head_dim);
                         std.mem.copy(
                             f32,
                             outputs[out_offset .. out_offset + head_dim],
