@@ -160,6 +160,55 @@ test "CausalSelfAttention.transpose" {
     try expectTensorsApproxEqual(expected, actual);
 }
 
+test "CausalSelfAttention.split_qkv" {
+    const batch_size = 3;
+    const n_heads = 3;
+    const seq_len = 5;
+    const head_dim = 4;
+    const n_embed = n_heads * head_dim;
+
+    const allocator = std.heap.page_allocator;
+    var inputs = try ops.load_tensor(
+        "models/test/split_inputs",
+        &[_]usize{ batch_size, seq_len, 3 * n_embed },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(inputs);
+    var expected_q = try ops.load_tensor(
+        "models/test/split_q",
+        &[_]usize{ batch_size, seq_len, n_heads, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected_q);
+    var expected_k = try ops.load_tensor(
+        "models/test/split_k",
+        &[_]usize{ batch_size, seq_len, n_heads, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected_k);
+    var expected_v = try ops.load_tensor(
+        "models/test/split_v",
+        &[_]usize{ batch_size, seq_len, n_heads, head_dim },
+        f32,
+        &allocator,
+    );
+    defer allocator.free(expected_v);
+
+    const actual_q = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 0, &allocator);
+    const actual_k = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 1, &allocator);
+    const actual_v = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 2, &allocator);
+    defer allocator.free(actual_q);
+    defer allocator.free(actual_k);
+    defer allocator.free(actual_v);
+
+    try expectTensorsApproxEqual(expected_q, actual_q);
+    try expectTensorsApproxEqual(expected_k, actual_k);
+    try expectTensorsApproxEqual(expected_v, actual_v);
+}
+
 test "gelu" {
     const batch_size = 3;
     const in_features = 5;

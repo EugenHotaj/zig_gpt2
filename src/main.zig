@@ -100,6 +100,27 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
             return Self{};
         }
 
+        // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
+        // determines which split to return.
+        pub fn split_qkv(inputs: []const f32, split_idx: usize, allocator: *const std.mem.Allocator) ![]f32 {
+            const n_embed_ = 3 * n_embed;
+            const batch_size = inputs.len / (seq_len * n_embed_);
+            var outputs = try allocator.alloc(f32, inputs.len / 3);
+            for (0..batch_size) |b| {
+                for (0..seq_len) |r| {
+                    const out_offset = (b * seq_len * n_embed) + (r * n_embed);
+                    const in_offset = (b * seq_len * n_embed_) + (r * n_embed_) + (split_idx * n_embed);
+                    std.mem.copy(
+                        f32,
+                        outputs[out_offset .. out_offset + n_embed],
+                        inputs[in_offset .. in_offset + n_embed],
+                    );
+                }
+            }
+            return outputs;
+        }
+
+        // Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
         pub fn transpose(inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
             const batch_size = inputs.len / (seq_len * n_embed);
             var outputs = try allocator.alloc(f32, inputs.len);
@@ -108,7 +129,11 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
                     for (0..seq_len) |r| {
                         const out_offset = (b * seq_len * n_embed) + (h * seq_len * head_dim) + (r * head_dim);
                         const in_offset = (b * seq_len * n_embed) + (r * n_embed) + (h * head_dim);
-                        std.mem.copy(f32, outputs[out_offset .. out_offset + head_dim], inputs[in_offset .. in_offset + head_dim]);
+                        std.mem.copy(
+                            f32,
+                            outputs[out_offset .. out_offset + head_dim],
+                            inputs[in_offset .. in_offset + head_dim],
+                        );
                     }
                 }
             }

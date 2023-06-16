@@ -80,7 +80,14 @@ inputs = torch.randn(batch_size, seq_len, n_head, head_dim)
 outputs = inputs.transpose(1, 2)
 name_to_tensor.update({"transpose_inputs": inputs, "transpose_outputs": outputs})
 
-# Generate causal self attention.
+# Generate split intermediaries.
+inputs = torch.randn(batch_size, seq_len, 3 * n_embed)
+q, k, v = inputs.split(n_embed, dim=2)
+name_to_tensor.update(
+    {"split_inputs": inputs, "split_q": q, "split_k": k, "split_v": v}
+)
+
+
 c_attn = nn.Linear(in_features=n_embed, out_features=3 * n_embed)
 inputs = torch.randn(batch_size, seq_len, n_embed)
 outputs = c_attn(inputs)
