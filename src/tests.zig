@@ -1,5 +1,5 @@
 const std = @import("std");
-const ops = @import("main.zig");
+const ops = @import("ops.zig");
 
 pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !void {
     for (0..expected.len) |i| {
