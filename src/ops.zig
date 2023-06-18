@@ -15,11 +15,11 @@ pub fn Linear(comptime in_features: usize, comptime out_features: usize) type {
             var outputs = try allocator.alloc(f32, batch_size * out_features);
             for (0..batch_size) |b| {
                 for (0..out_features) |o| {
-                    var sum: f32 = 0.0;
+                    var sum: f64 = 0.0;
                     for (0..in_features) |i| {
                         sum += inputs[b * in_features + i] * self.weight[o * in_features + i];
                     }
-                    outputs[b * out_features + o] = sum + self.bias[o];
+                    outputs[b * out_features + o] = @floatCast(f32, sum + self.bias[o]);
                 }
             }
             return outputs;
@@ -206,9 +206,9 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
 pub fn gelu(inputs: []f32) void {
     for (0..inputs.len) |i| {
         const x = inputs[i];
-        const z = std.math.sqrt(2.0 / std.math.pi);
-        const erf = std.math.tanh(z * (x + 0.044715 * std.math.pow(f32, x, 3.0)));
-        inputs[i] = 0.5 * x * (1.0 + erf);
+        const z: f64 = std.math.sqrt(2.0 / std.math.pi);
+        const erf: f64 = std.math.tanh(z * (x + 0.044715 * std.math.pow(f64, x, 3.0)));
+        inputs[i] = @floatCast(f32, 0.5 * x * (1.0 + erf));
     }
 }
 

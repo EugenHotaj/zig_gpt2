@@ -37,10 +37,7 @@ pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !voi
         try std.testing.expectApproxEqAbs(
             expected[i],
             actual[i],
-            // TODO(eugenhotaj): Why are we losing precision? We're applying the same
-            // operations (at least mathematically) as PyTorch. After 1e-6 all tests
-            // start failing.
-            1e-4,
+            5e-6,
         );
     }
 }
