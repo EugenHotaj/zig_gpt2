@@ -10,7 +10,7 @@ Low probability of success.
 
 TODOs:
 * ✅ Implement basic ops: Embedding, Linear, LayerNorm, GELU, Softmax, CausalSelfAttention.
-* Implement transformer modules: MLP, Transformer block.
+* ✅ Implement transformer modules: MLP, Transformer block.
 * Implement the full GPT model.
 * Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
 
