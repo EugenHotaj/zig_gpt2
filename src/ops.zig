@@ -68,21 +68,23 @@ pub fn LayerNorm(comptime n_features: usize) type {
             const batch_size = inputs.len / n_features;
             for (0..batch_size) |b| {
                 // Compute the mean and variance.
-                var mean: f32 = 0.0;
-                var std_: f32 = 0.0;
+                var mean: f64 = 0.0;
+                var std_: f64 = 0.0;
                 for (0..n_features) |i| {
                     const x = inputs[b * n_features + i];
                     mean += x;
                     std_ += x * x;
                 }
-                mean /= @intToFloat(f32, n_features);
-                std_ = std.math.sqrt((std_ / @intToFloat(f32, n_features)) - (mean * mean) + self.eps);
+                const n = @intToFloat(f64, n_features);
+                mean /= n;
+                std_ = std.math.sqrt((std_ / n) - (mean * mean) + self.eps);
 
                 // Normalize.
                 for (0..n_features) |i| {
                     const idx = b * n_features + i;
                     const x = inputs[idx];
-                    inputs[idx] = (x - mean) / std_ * self.weight[i] + self.bias[i];
+                    const result = (x - mean) / std_ * self.weight[i] + self.bias[i];
+                    inputs[idx] = @floatCast(f32, result);
                 }
             }
         }
@@ -221,14 +223,14 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
     for (0..batch_size) |b| {
         const max = std.mem.max(f32, inputs[(b * n_features) .. (b + 1) * n_features]);
 
-        var sum: f32 = 0.0;
+        var sum: f64 = 0.0;
         for (0..n_features) |i| {
             const idx = b * n_features + i;
             inputs[idx] = std.math.exp(inputs[idx] - max);
             sum += inputs[idx];
         }
         for (0..n_features) |i| {
-            inputs[b * n_features + i] /= sum;
+            inputs[b * n_features + i] /= @floatCast(f32, sum);
         }
     }
 }
@@ -265,23 +267,24 @@ pub fn scaled_dot_product_attention(
                     }
 
                     // Otherwise compute (q @ k.T) / sqrt(head_dim).
-                    var sum: f32 = 0.0;
+                    var sum: f64 = 0.0;
                     for (0..head_dim) |i| {
                         sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
                     }
-                    attn[out_offset + r * seq_len + c] = sum / @intToFloat(f32, std.math.sqrt(head_dim));
+                    const value = sum / @intToFloat(f64, std.math.sqrt(head_dim));
+                    attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
                 }
                 const offset = out_offset + r * seq_len;
                 softmax(seq_len, attn[offset .. offset + seq_len]);
 
                 // Compute attn @ v.
                 for (0..head_dim) |c| {
-                    var sum: f32 = 0.0;
+                    var sum: f64 = 0.0;
                     for (0..seq_len) |i| {
                         // TODO(eugenhotaj): Not cache friendly.
                         sum += attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
                     }
-                    outputs[in_offset + r * head_dim + c] = sum;
+                    outputs[in_offset + r * head_dim + c] = @floatCast(f32, sum);
                 }
             }
         }

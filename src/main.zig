@@ -93,7 +93,7 @@ pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !voi
         try std.testing.expectApproxEqAbs(
             expected[i],
             actual[i],
-            5e-4,
+            7e-5,
         );
     }
 }
