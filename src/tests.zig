@@ -14,13 +14,13 @@ pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !voi
 
 test "Linear" {
     const batch_size = 3;
-    const in_features = 5;
-    const out_features = 10;
+    const in_features = 768;
+    const out_features = 4 * 768;
 
     const allocator = std.heap.page_allocator;
     const weight = try ops.load_tensor(
         "models/test/linear_weight",
-        &[_]usize{ out_features, in_features },
+        &[_]usize{ in_features, out_features },
         f32,
         &allocator,
     );
@@ -57,7 +57,7 @@ test "Linear" {
 test "Embedding" {
     const batch_size = 3;
     const vocab_size = 10;
-    const embedding_dim = 5;
+    const embedding_dim = 768;
 
     const allocator = std.heap.page_allocator;
     const weight = try ops.load_tensor(
@@ -91,12 +91,12 @@ test "Embedding" {
 
 test "LayerNorm" {
     const batch_size = 3;
-    const in_features = 5;
+    const in_features = 768;
 
     const allocator = std.heap.page_allocator;
     const weight = try ops.load_tensor(
         "models/test/layer_norm_weight",
-        &[_]usize{ in_features, 1 },
+        &[_]usize{in_features},
         f32,
         &allocator,
     );
@@ -132,9 +132,9 @@ test "LayerNorm" {
 
 test "CausalSelfAttention.split_qkv" {
     const batch_size = 3;
-    const n_heads = 3;
+    const n_heads = 12;
     const seq_len = 5;
-    const head_dim = 4;
+    const head_dim = 64;
     const n_embed = n_heads * head_dim;
 
     const allocator = std.heap.page_allocator;
@@ -181,9 +181,9 @@ test "CausalSelfAttention.split_qkv" {
 
 test "CausalSelfAttention.transpose" {
     const batch_size = 3;
-    const n_heads = 3;
+    const n_heads = 12;
     const seq_len = 5;
-    const head_dim = 4;
+    const head_dim = 64;
 
     const allocator = std.heap.page_allocator;
     var inputs = try ops.load_tensor(
@@ -209,9 +209,9 @@ test "CausalSelfAttention.transpose" {
 
 test "CausalSelfAttention.forward" {
     const batch_size = 3;
-    const n_heads = 3;
+    const n_heads = 12;
     const seq_len = 5;
-    const head_dim = 4;
+    const head_dim = 64;
     const n_embed = n_heads * head_dim;
 
     const allocator = std.heap.page_allocator;
@@ -271,7 +271,7 @@ test "CausalSelfAttention.forward" {
 
 test "gelu" {
     const batch_size = 3;
-    const in_features = 5;
+    const in_features = 768;
 
     const allocator = std.heap.page_allocator;
     var inputs = try ops.load_tensor(
@@ -297,7 +297,7 @@ test "gelu" {
 
 test "softmax" {
     const batch_size = 3;
-    const in_features = 5;
+    const in_features = 768;
 
     const allocator = std.heap.page_allocator;
     var inputs = try ops.load_tensor(
@@ -323,9 +323,9 @@ test "softmax" {
 
 test "scaled_dot_product_attention" {
     const batch_size = 2;
-    const n_heads = 3;
+    const n_heads = 12;
     const seq_len = 5;
-    const head_dim = 4;
+    const head_dim = 64;
 
     const allocator = std.heap.page_allocator;
     const q = try ops.load_tensor(

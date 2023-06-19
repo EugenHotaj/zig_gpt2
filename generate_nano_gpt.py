@@ -21,7 +21,6 @@ class GPTConfig:
     block_size: int = 1024
     n_head: int = 12
     n_embd: int = 768
-    dropout: float = 0.0
 
 
 def new_gelu(x):
@@ -40,13 +39,11 @@ class MLP(nn.Module):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
-        self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
         x = new_gelu(x)
         x = self.c_proj(x)
-        x = self.dropout(x)
         return x
 
 
@@ -54,16 +51,12 @@ class CausalSelfAttention(nn.Module):
     def __init__(self, config: GPTConfig):
         super().__init__()
         assert config.n_embd % config.n_head == 0
+        self.n_head = config.n_head
+        self.n_embd = config.n_embd
         # Key, query, value projections for all heads, but in a batch.
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         # Output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        # Regularization.
-        self.attn_dropout = nn.Dropout(config.dropout)
-        self.resid_dropout = nn.Dropout(config.dropout)
-        self.n_head = config.n_head
-        self.n_embd = config.n_embd
-        self.dropout = config.dropout
         # Causal mask.
         bias = torch.tril(torch.ones(config.block_size, config.block_size))
         bias = bias.view(1, 1, config.block_size, config.block_size)
@@ -85,14 +78,13 @@ class CausalSelfAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
-        att = self.attn_dropout(att)
         y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
 
         # Re-assemble all head outputs side by side.
         y = y.transpose(1, 2).contiguous().view(B, T, C)
 
         # Output projection.
-        y = self.resid_dropout(self.c_proj(y))
+        y = self.c_proj(y)
         return y
 
 
@@ -147,10 +139,13 @@ def load_block(module: Block, layer: int, n_embd: int) -> None:
     load_mlp(module.mlp, layer, n_embd)
 
 
-gpt_config = GPTConfig(dropout=0.2)  # Dropout should have no effect for inference.
+gpt_config = GPTConfig()
 with open(f"models/124M/raw/model-wte", "rb") as file_:
     tensor = np.frombuffer(file_.read(), dtype=np.float32)
-    inputs = torch.tensor(tensor)[: 3 * 5 * gpt_config.n_embd].reshape(3, 5, -1)
+    tensor = torch.tensor(tensor).reshape(-1, 768)
+    inputs = torch.randint(0, tensor.shape[0], (15,))
+    inputs = tensor[inputs].reshape(3, 5, 768)
+
 
 block = Block(gpt_config)
 load_block(block, 0, gpt_config.n_embd)

@@ -77,7 +77,7 @@ pub fn LayerNorm(comptime n_features: usize) type {
                 }
                 const n = @intToFloat(f64, n_features);
                 mean /= n;
-                std_ = std.math.sqrt((std_ / n) - (mean * mean) + self.eps);
+                std_ = @sqrt((std_ / n) - (mean * mean) + self.eps);
 
                 // Normalize.
                 for (0..n_features) |i| {
@@ -208,7 +208,7 @@ pub fn CausalSelfAttention(comptime n_heads: usize, comptime seq_len: usize, com
 pub fn gelu(inputs: []f32) void {
     for (0..inputs.len) |i| {
         const x = inputs[i];
-        const z: f64 = std.math.sqrt(2.0 / std.math.pi);
+        const z: f64 = @sqrt(2.0 / std.math.pi);
         const erf: f64 = std.math.tanh(z * (x + 0.044715 * std.math.pow(f64, x, 3.0)));
         inputs[i] = @floatCast(f32, 0.5 * x * (1.0 + erf));
     }
@@ -226,7 +226,7 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
         var sum: f64 = 0.0;
         for (0..n_features) |i| {
             const idx = b * n_features + i;
-            inputs[idx] = std.math.exp(inputs[idx] - max);
+            inputs[idx] = @exp(inputs[idx] - max);
             sum += inputs[idx];
         }
         for (0..n_features) |i| {
@@ -271,7 +271,7 @@ pub fn scaled_dot_product_attention(
                     for (0..head_dim) |i| {
                         sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
                     }
-                    const value = sum / @intToFloat(f64, std.math.sqrt(head_dim));
+                    const value = sum / @sqrt(@intToFloat(f64, head_dim));
                     attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
                 }
                 const offset = out_offset + r * seq_len;

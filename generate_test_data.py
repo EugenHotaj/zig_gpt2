@@ -8,8 +8,8 @@ from torch import nn
 name_to_tensor = {}
 
 # Generate Linear.
-linear = nn.Linear(in_features=5, out_features=10)
-inputs = torch.randn(3, 5)
+linear = nn.Linear(in_features=768, out_features=4 * 768)
+inputs = torch.randn(3, 768)
 outputs = linear(inputs)
 name_to_tensor.update(
     {
@@ -33,19 +33,19 @@ def gelu(x):
     # fmt: on
 
 
-inputs = torch.randn(3, 5)
+inputs = torch.randn(3, 768)
 outputs = gelu(inputs)
 name_to_tensor.update({"gelu_inputs": inputs, "gelu_outputs": outputs})
 
 
 # Generate softmax.
-inputs = torch.randn(3, 5)
+inputs = torch.randn(3, 768)
 outputs = F.softmax(inputs, dim=-1)
 name_to_tensor.update({"softmax_inputs": inputs, "softmax_outputs": outputs})
 
 
 # Generate Embedding.
-embedding = nn.Embedding(10, 5)
+embedding = nn.Embedding(10, 768)
 inputs = torch.randint(0, 10, (3,))
 outputs = embedding(inputs)
 name_to_tensor.update(
@@ -58,8 +58,8 @@ name_to_tensor.update(
 
 
 # Generate LayerNorm.
-layer_norm = nn.LayerNorm(5)
-inputs = torch.randn(3, 5)
+layer_norm = nn.LayerNorm(768)
+inputs = torch.randn(3, 768)
 outputs = layer_norm(inputs)
 name_to_tensor.update(
     {
@@ -72,7 +72,7 @@ name_to_tensor.update(
 
 
 # Generate causal self attention.
-batch_size, seq_len, n_head, head_dim = 3, 5, 3, 4
+batch_size, seq_len, n_head, head_dim = 3, 5, 12, 64
 n_embed = n_head * head_dim
 
 # Generate transpose intermediaries.
