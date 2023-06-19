@@ -1,5 +1,5 @@
 zig-cache/
 zig-out/
-models/124M
+models/
 .venv/
 .DS_Store
