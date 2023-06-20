@@ -167,10 +167,10 @@ test "CausalSelfAttention.split_qkv" {
     );
     defer allocator.free(expected_v);
 
-    const fake_attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, undefined, undefined);
-    const actual_q = try fake_attn.split_qkv(inputs, 0, &allocator);
-    const actual_k = try fake_attn.split_qkv(inputs, 1, &allocator);
-    const actual_v = try fake_attn.split_qkv(inputs, 2, &allocator);
+    const fake_attn = ops.CausalSelfAttention.init(n_heads, n_embed, undefined, undefined);
+    const actual_q = try fake_attn.split_qkv(seq_len, inputs, 0, &allocator);
+    const actual_k = try fake_attn.split_qkv(seq_len, inputs, 1, &allocator);
+    const actual_v = try fake_attn.split_qkv(seq_len, inputs, 2, &allocator);
     defer allocator.free(actual_q);
     defer allocator.free(actual_k);
     defer allocator.free(actual_v);
@@ -185,6 +185,7 @@ test "CausalSelfAttention.transpose" {
     const n_heads = 12;
     const seq_len = 5;
     const head_dim = 64;
+    const n_embed = n_heads * head_dim;
 
     const allocator = std.heap.page_allocator;
     var inputs = try ops.load_tensor(
@@ -202,8 +203,8 @@ test "CausalSelfAttention.transpose" {
     );
     defer allocator.free(expected);
 
-    const fake_attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, undefined, undefined);
-    const actual = try fake_attn.transpose(inputs, &allocator);
+    const fake_attn = ops.CausalSelfAttention.init(n_heads, n_embed, undefined, undefined);
+    const actual = try fake_attn.transpose(seq_len, inputs, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -261,8 +262,8 @@ test "CausalSelfAttention.forward" {
 
     const c_attn = ops.Linear.init(n_embed, 3 * n_embed, c_attn_weight, c_attn_bias);
     const c_proj = ops.Linear.init(n_embed, n_embed, c_proj_weight, c_proj_bias);
-    const attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, c_attn, c_proj);
-    const actual = try attn.forward(inputs, &allocator);
+    const attn = ops.CausalSelfAttention.init(n_heads, n_embed, c_attn, c_proj);
+    const actual = try attn.forward(seq_len, inputs, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);

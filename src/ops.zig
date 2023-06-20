@@ -104,45 +104,46 @@ pub const CausalSelfAttention = struct {
     const Self = @This();
 
     n_heads: usize,
-    seq_len: usize,
-    head_dim: usize,
     n_embed: usize,
+    head_dim: usize,
     c_attn: Linear,
     c_proj: Linear,
 
-    pub fn init(n_heads: usize, seq_len: usize, head_dim: usize, c_attn: Linear, c_proj: Linear) Self {
-        const n_embed = n_heads * head_dim;
+    pub fn init(n_heads: usize, n_embed: usize, c_attn: Linear, c_proj: Linear) Self {
         return Self{
             .n_heads = n_heads,
-            .seq_len = seq_len,
-            .head_dim = head_dim,
             .n_embed = n_embed,
+            .head_dim = n_embed / n_heads,
             .c_attn = c_attn,
             .c_proj = c_proj,
         };
     }
 
-    pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
         const qkv = try self.c_attn.forward(inputs, allocator);
         const q = try self.transpose(
-            try self.split_qkv(qkv, 0, allocator),
+            seq_len,
+            try self.split_qkv(seq_len, qkv, 0, allocator),
             allocator,
         );
         const k = try self.transpose(
-            try self.split_qkv(qkv, 1, allocator),
+            seq_len,
+            try self.split_qkv(seq_len, qkv, 1, allocator),
             allocator,
         );
         const v = try self.transpose(
-            try self.split_qkv(qkv, 2, allocator),
+            seq_len,
+            try self.split_qkv(seq_len, qkv, 2, allocator),
             allocator,
         );
         const outputs = try self.untranspose(
+            seq_len,
             try scaled_dot_product_attention(
                 q,
                 k,
                 v,
                 self.n_heads,
-                self.seq_len,
+                seq_len,
                 self.head_dim,
                 allocator,
             ),
@@ -153,14 +154,20 @@ pub const CausalSelfAttention = struct {
 
     // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
     // determines which split to return.
-    pub fn split_qkv(self: Self, inputs: []const f32, split_idx: usize, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn split_qkv(
+        self: Self,
+        seq_len: usize,
+        inputs: []const f32,
+        split_idx: usize,
+        allocator: *const std.mem.Allocator,
+    ) ![]f32 {
         const n_embed_ = 3 * self.n_embed;
-        const batch_size = inputs.len / (self.seq_len * n_embed_);
+        const batch_size = inputs.len / (seq_len * n_embed_);
         var outputs = try allocator.alloc(f32, inputs.len / 3);
         for (0..batch_size) |b| {
-            for (0..self.seq_len) |r| {
-                const out_offset = (b * self.seq_len * self.n_embed) + (r * self.n_embed);
-                const in_offset = (b * self.seq_len * n_embed_) + (r * n_embed_) + (split_idx * self.n_embed);
+            for (0..seq_len) |r| {
+                const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed);
+                const in_offset = (b * seq_len * n_embed_) + (r * n_embed_) + (split_idx * self.n_embed);
                 std.mem.copy(
                     f32,
                     outputs[out_offset .. out_offset + self.n_embed],
@@ -172,14 +179,14 @@ pub const CausalSelfAttention = struct {
     }
 
     // Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
-    pub fn transpose(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
-        const batch_size = inputs.len / (self.seq_len * self.n_embed);
+    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+        const batch_size = inputs.len / (seq_len * self.n_embed);
         var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
             for (0..self.n_heads) |h| {
-                for (0..self.seq_len) |r| {
-                    const out_offset = (b * self.seq_len * self.n_embed) + (h * self.seq_len * self.head_dim) + (r * self.head_dim);
-                    const in_offset = (b * self.seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
+                for (0..seq_len) |r| {
+                    const out_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
+                    const in_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
                     std.mem.copy(
                         f32,
                         outputs[out_offset .. out_offset + self.head_dim],
@@ -192,14 +199,14 @@ pub const CausalSelfAttention = struct {
     }
 
     // Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
-    pub fn untranspose(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
-        const batch_size = inputs.len / (self.seq_len * self.n_embed);
+    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+        const batch_size = inputs.len / (seq_len * self.n_embed);
         var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
-            for (0..self.seq_len) |r| {
+            for (0..seq_len) |r| {
                 for (0..self.n_heads) |h| {
-                    const out_offset = (b * self.seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
-                    const in_offset = (b * self.seq_len * self.n_embed) + (h * self.seq_len * self.head_dim) + (r * self.head_dim);
+                    const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
+                    const in_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
                     std.mem.copy(
                         f32,
                         outputs[out_offset .. out_offset + self.head_dim],

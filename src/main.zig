@@ -5,13 +5,10 @@ const GPTConfig = struct {
     const Self = @This();
 
     n_heads: usize,
-    seq_len: usize,
-    head_dim: usize,
     n_embed: usize,
 
-    pub fn init(n_heads: usize, seq_len: usize, head_dim: usize) Self {
-        const n_embed = n_heads * head_dim;
-        return Self{ .n_heads = n_heads, .seq_len = seq_len, .head_dim = head_dim, .n_embed = n_embed };
+    pub fn init(n_heads: usize, n_embed: usize) Self {
+        return Self{ .n_heads = n_heads, .n_embed = n_embed };
     }
 };
 
@@ -44,13 +41,13 @@ const Block = struct {
         return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
     }
 
-    pub fn forward(self: Self, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, seq_len: usize, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
         // Create a copy of x for residual computation.
         var x = try allocator.alloc(f32, inputs.len);
         std.mem.copyForwards(f32, x, inputs);
 
         self.ln_1.forward(x);
-        x = try self.attn.forward(x, allocator);
+        x = try self.attn.forward(seq_len, x, allocator);
         for (0..x.len) |i| {
             x[i] += inputs[i];
             inputs[i] = x[i];
@@ -61,6 +58,20 @@ const Block = struct {
             x[i] += inputs[i];
         }
         return x;
+    }
+};
+
+const GPT = struct {
+    const Self = @This();
+
+    config: GPTConfig,
+    wte: ops.Embedding,
+    wpe: ops.Embedding,
+    h: []const Block,
+    ln_f: ops.LayerNorm,
+
+    pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm) Self {
+        return Self{ .config = config, .wte = wte, .wpe = wpe, .h = h, .ln_f = ln_f };
     }
 };
 
@@ -148,33 +159,34 @@ pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Alloca
     defer allocator.free(mlp_c_proj_name);
     const mlp_c_proj = try load_linear(mlp_c_proj_name, 4 * config.n_embed, config.n_embed, allocator);
 
-    const attn = ops.CausalSelfAttention.init(config.n_heads, config.seq_len, config.head_dim, c_attn, c_proj);
+    const attn = ops.CausalSelfAttention.init(config.n_heads, config.n_embed, c_attn, c_proj);
     const mlp = MLP.init(c_fc, mlp_c_proj);
     return Block.init(ln_1, attn, ln_2, mlp);
 }
 
 pub fn main() !void {
     const batch_size = 3;
-    const config = GPTConfig.init(12, 5, 64);
+    const seq_len = 5;
+    const config = GPTConfig.init(12, 768);
 
     const allocator = std.heap.page_allocator;
     const block = try load_block(0, config, allocator);
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
-        &[_]usize{ batch_size, config.seq_len, config.n_embed },
+        &[_]usize{ batch_size, seq_len, config.n_embed },
         f32,
         &allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/gpt_outputs",
-        &[_]usize{ batch_size, config.seq_len, config.n_embed },
+        &[_]usize{ batch_size, seq_len, config.n_embed },
         f32,
         &allocator,
     );
     defer allocator.free(expected);
 
-    const actual = try block.forward(inputs, &allocator);
+    const actual = try block.forward(seq_len, inputs, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
