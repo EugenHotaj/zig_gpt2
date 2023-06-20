@@ -1,7 +1,11 @@
 """Definition of GPT-2, largely copied from NanoGPT [1].
 
-NOTE: There is some divergence from NanoGPT, such as always including biases (since 
-GPT-2) uses them, using the default LayerNorm, not supporting flash attention, etc.
+NOTE: There is some divergence from NanoGPT: 
+    * Always use biases and the default LayerNorm (like GPT-2).
+    * Use the same vocab size as GPT-2.
+    * Remove dropout (does not affect inference).
+    * Stripped down GPT module which only includes forward and returns logits.
+    * No support for PyTorch 2.0 / flash attention.
 
 [1]: https://github.com/karpathy/nanoGPT/blob/master/model.py
 """
@@ -18,7 +22,9 @@ from torch.nn import functional as F
 
 @dataclass
 class GPTConfig:
+    vocab_size: int = 50257
     block_size: int = 1024
+    n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
 
@@ -102,22 +108,57 @@ class Block(nn.Module):
         return x
 
 
-def load_linear(module: nn.Linear, layer_name: str, in_f: int, out_f: int) -> None:
-    with open(f"models/124M/raw/model-{layer_name}-w", "rb") as file_:
+class GPT(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wpe=nn.Embedding(config.block_size, config.n_embd),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=nn.LayerNorm(config.n_embd),
+            )
+        )
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # https://paperswithcode.com/method/weight-tying
+        self.transformer.wte.weight = self.lm_head.weight
+
+    def forward(self, idx):
+        _, t = idx.size()
+        pos = torch.arange(0, t, dtype=torch.long, device=idx.device)  # (t)
+
+        # Forward the GPT model.
+        tok_emb = self.transformer.wte(idx)  # token embeddings (B, T, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # position embeddings (T, n_embd)
+        x = tok_emb + pos_emb
+        for block in self.transformer.h:
+            x = block(x)
+        x = self.transformer.ln_f(x)
+
+        # TODO(eugenhotaj): inference-time mini-optimization: only forward the lm_head
+        # on the very last position
+        # logits = self.lm_head(x[:, [-1], :]) # Using [-1] to preserve the time dim.
+        logits = self.lm_head(x)
+
+        return logits
+
+
+def load_linear(module: nn.Linear, name: str, in_f: int, out_f: int) -> None:
+    with open(f"models/124M/raw/model-{name}-w", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.weight.data = torch.tensor(tensor).reshape(out_f, in_f)
 
-    with open(f"models/124M/raw/model-{layer_name}-b", "rb") as file_:
+    with open(f"models/124M/raw/model-{name}-b", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.bias.data = torch.tensor(tensor).reshape(out_f)
 
 
-def load_layernorm(module: nn.LayerNorm, layer: int, idx: int) -> None:
-    with open(f"models/124M/raw/model-h{layer}-ln_{idx}-b", "rb") as file_:
+def load_layernorm(module: nn.LayerNorm, name: str) -> None:
+    with open(f"models/124M/raw/model-{name}-b", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.weight.data = torch.tensor(tensor)
 
-    with open(f"models/124M/raw/model-h{layer}-ln_{idx}-g", "rb") as file_:
+    with open(f"models/124M/raw/model-{name}-g", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.bias.data = torch.tensor(tensor)
 
@@ -133,25 +174,32 @@ def load_mlp(module: MLP, layer: int, n_embd: int) -> None:
 
 
 def load_block(module: Block, layer: int, n_embd: int) -> None:
-    load_layernorm(module.ln_1, layer, 1)
+    load_layernorm(module.ln_1, f"h{layer}-ln_1")
     load_attention(module.attn, layer, n_embd)
-    load_layernorm(module.ln_2, layer, 2)
+    load_layernorm(module.ln_2, f"h{layer}-ln_2")
     load_mlp(module.mlp, layer, n_embd)
 
 
+def load_gpt(module: GPT, config: GPTConfig) -> None:
+    with open(f"models/124M/raw/model-wte", "rb") as file_:
+        tensor = np.frombuffer(file_.read(), dtype=np.float32)
+        tensor = torch.tensor(tensor).reshape(config.vocab_size, config.n_embd)
+        module.transformer.wte.data = tensor
+        module.lm_head.weigth = tensor.T
+    with open(f"models/124M/raw/model-wpe", "rb") as file_:
+        tensor = np.frombuffer(file_.read(), dtype=np.float32)
+        tensor = torch.tensor(tensor).reshape(config.block_size, config.n_embd)
+        module.transformer.wte.data = tensor
+    for i in range(config.n_layer):
+        load_block(module.transformer.h[i], i, config.n_embd)
+    load_layernorm(module.transformer.ln_f, "ln_f")
+
+
 gpt_config = GPTConfig()
-with open(f"models/124M/raw/model-wte", "rb") as file_:
-    tensor = np.frombuffer(file_.read(), dtype=np.float32)
-    tensor = torch.tensor(tensor).reshape(-1, 768)
-    inputs = torch.randint(0, tensor.shape[0], (15,))
-    inputs = tensor[inputs].reshape(3, 5, 768)
-
-
-block = Block(gpt_config)
-load_block(block, 0, gpt_config.n_embd)
-block = block.eval()
-outputs = block(inputs)
-
+gpt = GPT(gpt_config)
+load_gpt(gpt, gpt_config)
+inputs = torch.randint(0, gpt_config.vocab_size, (3, 5))
+outputs = gpt(inputs)
 name_to_tensor = {
     "gpt_inputs": inputs,
     "gpt_outputs": outputs,
