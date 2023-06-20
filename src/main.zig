@@ -1,92 +1,54 @@
 const std = @import("std");
 const ops = @import("ops.zig");
 
-pub fn MLP(comptime n_embed: usize) type {
-    const c_fc_t = ops.Linear(n_embed, 4 * n_embed);
-    const c_proj_t = ops.Linear(4 * n_embed, n_embed);
+const MLP = struct {
+    const Self = @This();
 
-    return struct {
-        const Self = @This();
-        c_fc: c_fc_t,
-        c_proj: c_proj_t,
+    c_fc: ops.Linear,
+    c_proj: ops.Linear,
 
-        pub fn init(
-            c_fc_weight: []const f32,
-            c_fc_bias: []const f32,
-            c_proj_weight: []const f32,
-            c_proj_bias: []const f32,
-        ) Self {
-            return Self{
-                .c_fc = c_fc_t.init(c_fc_weight, c_fc_bias),
-                .c_proj = c_proj_t.init(c_proj_weight, c_proj_bias),
-            };
+    pub fn init(c_fc: ops.Linear, c_proj: ops.Linear) MLP {
+        return MLP{ .c_fc = c_fc, .c_proj = c_proj };
+    }
+
+    pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+        var x: []f32 = try self.c_fc.forward(inputs, allocator);
+        ops.gelu(x);
+        return self.c_proj.forward(x, allocator);
+    }
+};
+
+const Block = struct {
+    const Self = @This();
+
+    ln_1: ops.LayerNorm,
+    attn: ops.CausalSelfAttention,
+    ln_2: ops.LayerNorm,
+    mlp: MLP,
+
+    pub fn init(ln_1: ops.LayerNorm, attn: ops.CausalSelfAttention, ln_2: ops.LayerNorm, mlp: MLP) Self {
+        return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
+    }
+
+    pub fn forward(self: Self, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
+        // Create a copy of x for residual computation.
+        var x = try allocator.alloc(f32, inputs.len);
+        std.mem.copyForwards(f32, x, inputs);
+
+        self.ln_1.forward(x);
+        x = try self.attn.forward(x, allocator);
+        for (0..x.len) |i| {
+            x[i] += inputs[i];
+            inputs[i] = x[i];
         }
-
-        pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
-            var x: []f32 = undefined;
-            x = try self.c_fc.forward(inputs, allocator);
-            ops.gelu(x);
-            x = try self.c_proj.forward(x, allocator);
-            return x;
+        self.ln_2.forward(x);
+        x = try self.mlp.forward(x, allocator);
+        for (0..x.len) |i| {
+            x[i] += inputs[i];
         }
-    };
-}
-
-pub fn Block(comptime n_heads: usize, comptime seq_len: usize, comptime head_dim: usize) type {
-    const n_embed = n_heads * head_dim;
-    const ln_t = ops.LayerNorm(n_embed);
-    const attn_t = ops.CausalSelfAttention(n_heads, seq_len, head_dim);
-    const mlp_t = MLP(n_embed);
-
-    return struct {
-        const Self = @This();
-        ln_1: ln_t,
-        attn: attn_t,
-        ln_2: ln_t,
-        mlp: mlp_t,
-
-        pub fn init(
-            ln_1_weight: []const f32,
-            ln_1_bias: []const f32,
-            c_attn_weight: []const f32,
-            c_attn_bias: []const f32,
-            c_proj_weight: []const f32,
-            c_proj_bias: []const f32,
-            ln_2_weight: []const f32,
-            ln_2_bias: []const f32,
-            c_fc_weight: []const f32,
-            c_fc_bias: []const f32,
-            mlp_c_proj_weight: []const f32,
-            mlp_c_proj_bias: []const f32,
-        ) Self {
-            return Self{
-                .ln_1 = ln_t.init(ln_1_weight, ln_1_bias),
-                .attn = attn_t.init(c_attn_weight, c_attn_bias, c_proj_weight, c_proj_bias),
-                .ln_2 = ln_t.init(ln_2_weight, ln_2_bias),
-                .mlp = mlp_t.init(c_fc_weight, c_fc_bias, mlp_c_proj_weight, mlp_c_proj_bias),
-            };
-        }
-
-        pub fn forward(self: Self, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
-            // Create a copy of x for residual computation.
-            var x = try allocator.alloc(f32, inputs.len);
-            std.mem.copyForwards(f32, x, inputs);
-
-            self.ln_1.forward(x);
-            x = try self.attn.forward(x, allocator);
-            for (0..x.len) |i| {
-                x[i] += inputs[i];
-                inputs[i] = x[i];
-            }
-            self.ln_2.forward(x);
-            x = try self.mlp.forward(x, allocator);
-            for (0..x.len) |i| {
-                x[i] += inputs[i];
-            }
-            return x;
-        }
-    };
-}
+        return x;
+    }
+};
 
 pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !void {
     for (0..expected.len) |i| {
@@ -204,20 +166,20 @@ pub fn main() !void {
     );
     defer allocator.free(expected);
 
-    const block = Block(n_heads, seq_len, head_dim).init(
-        ln_1_weight,
-        ln_1_bias,
-        c_attn_weight,
-        c_attn_bias,
-        c_proj_weight,
-        c_proj_bias,
-        ln_2_weight,
-        ln_2_bias,
-        c_fc_weight,
-        c_fc_bias,
-        mlp_c_proj_weight,
-        mlp_c_proj_bias,
+    const ln_1 = ops.LayerNorm.init(n_embed, ln_1_weight, ln_1_bias);
+    const ln_2 = ops.LayerNorm.init(n_embed, ln_2_weight, ln_2_bias);
+    const attn = ops.CausalSelfAttention.init(
+        n_heads,
+        seq_len,
+        head_dim,
+        ops.Linear.init(n_embed, 3 * n_embed, c_attn_weight, c_attn_bias),
+        ops.Linear.init(n_embed, n_embed, c_proj_weight, c_proj_bias),
     );
+    const mlp = MLP.init(
+        ops.Linear.init(n_embed, 4 * n_embed, c_fc_weight, c_fc_bias),
+        ops.Linear.init(4 * n_embed, n_embed, mlp_c_proj_weight, mlp_c_proj_bias),
+    );
+    const block = Block.init(ln_1, attn, ln_2, mlp);
     const actual = try block.forward(inputs, &allocator);
     defer allocator.free(actual);
 

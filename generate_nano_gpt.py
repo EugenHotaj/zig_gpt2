@@ -199,7 +199,8 @@ gpt_config = GPTConfig()
 gpt = GPT(gpt_config)
 load_gpt(gpt, gpt_config)
 inputs = torch.randint(0, gpt_config.vocab_size, (3, 5))
-outputs = gpt(inputs)
+inputs = gpt.transformer.wte(inputs)
+outputs = gpt.transformer.h[0](inputs)
 name_to_tensor = {
     "gpt_inputs": inputs,
     "gpt_outputs": outputs,
