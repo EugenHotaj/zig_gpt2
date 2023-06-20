@@ -4,11 +4,20 @@ const ops = @import("ops.zig");
 const GPTConfig = struct {
     const Self = @This();
 
+    vocab_size: usize,
+    context_size: usize,
+    n_layer: usize,
     n_heads: usize,
     n_embed: usize,
 
-    pub fn init(n_heads: usize, n_embed: usize) Self {
-        return Self{ .n_heads = n_heads, .n_embed = n_embed };
+    pub fn init(vocab_size: usize, context_size: usize, n_layer: usize, n_heads: usize, n_embed: usize) Self {
+        return Self{
+            .vocab_size = vocab_size,
+            .context_size = context_size,
+            .n_layer = n_layer,
+            .n_heads = n_heads,
+            .n_embed = n_embed,
+        };
     }
 };
 
@@ -22,7 +31,7 @@ const MLP = struct {
         return MLP{ .c_fc = c_fc, .c_proj = c_proj };
     }
 
-    pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
         var x: []f32 = try self.c_fc.forward(inputs, allocator);
         ops.gelu(x);
         return self.c_proj.forward(x, allocator);
@@ -41,7 +50,7 @@ const Block = struct {
         return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
     }
 
-    pub fn forward(self: Self, seq_len: usize, inputs: []f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, seq_len: usize, inputs: []f32, allocator: std.mem.Allocator) ![]f32 {
         // Create a copy of x for residual computation.
         var x = try allocator.alloc(f32, inputs.len);
         std.mem.copyForwards(f32, x, inputs);
@@ -97,7 +106,7 @@ pub fn load_linear(
         weight_path,
         &[_]usize{ in_features, out_features },
         f32,
-        &allocator,
+        allocator,
     );
     const bias_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-b", .{name});
     defer allocator.free(bias_path);
@@ -105,7 +114,7 @@ pub fn load_linear(
         bias_path,
         &[_]usize{out_features},
         f32,
-        &allocator,
+        allocator,
     );
     return ops.Linear.init(in_features, out_features, weight, bias);
 }
@@ -121,7 +130,7 @@ pub fn load_layer_norm(
         weight_path,
         &[_]usize{n_features},
         f32,
-        &allocator,
+        allocator,
     );
     const bias_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-g", .{name});
     defer allocator.free(bias_path);
@@ -129,7 +138,7 @@ pub fn load_layer_norm(
         bias_path,
         &[_]usize{n_features},
         f32,
-        &allocator,
+        allocator,
     );
     return ops.LayerNorm.init(n_features, weight, bias);
 }
@@ -167,7 +176,7 @@ pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Alloca
 pub fn main() !void {
     const batch_size = 3;
     const seq_len = 5;
-    const config = GPTConfig.init(12, 768);
+    const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
     const allocator = std.heap.page_allocator;
     const block = try load_block(0, config, allocator);
@@ -175,18 +184,18 @@ pub fn main() !void {
         "models/test/gpt_inputs",
         &[_]usize{ batch_size, seq_len, config.n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/gpt_outputs",
         &[_]usize{ batch_size, seq_len, config.n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
-    const actual = try block.forward(seq_len, inputs, &allocator);
+    const actual = try block.forward(seq_len, inputs, allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);

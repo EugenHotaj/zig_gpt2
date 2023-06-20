@@ -17,7 +17,7 @@ pub const Linear = struct {
         };
     }
 
-    pub fn forward(self: Self, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
         const batch_size = inputs.len / self.in_features;
         var outputs = try allocator.alloc(f32, batch_size * self.out_features);
         for (0..batch_size) |b| {
@@ -46,7 +46,7 @@ pub const Embedding = struct {
         return Self{ .emb_dim = emb_dim, .weight = weight };
     }
 
-    pub fn forward(self: Self, idxs: []const usize, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, idxs: []const usize, allocator: std.mem.Allocator) ![]f32 {
         var embeddings = try allocator.alloc(f32, idxs.len * self.emb_dim);
         for (0..idxs) |i| {
             const idx = idxs[i];
@@ -119,7 +119,7 @@ pub const CausalSelfAttention = struct {
         };
     }
 
-    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
         const qkv = try self.c_attn.forward(inputs, allocator);
         const q = try self.transpose(
             seq_len,
@@ -159,7 +159,7 @@ pub const CausalSelfAttention = struct {
         seq_len: usize,
         inputs: []const f32,
         split_idx: usize,
-        allocator: *const std.mem.Allocator,
+        allocator: std.mem.Allocator,
     ) ![]f32 {
         const n_embed_ = 3 * self.n_embed;
         const batch_size = inputs.len / (seq_len * n_embed_);
@@ -179,7 +179,7 @@ pub const CausalSelfAttention = struct {
     }
 
     // Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
-    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
         const batch_size = inputs.len / (seq_len * self.n_embed);
         var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
@@ -199,7 +199,7 @@ pub const CausalSelfAttention = struct {
     }
 
     // Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
-    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, allocator: *const std.mem.Allocator) ![]f32 {
+    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
         const batch_size = inputs.len / (seq_len * self.n_embed);
         var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
@@ -261,7 +261,7 @@ pub fn scaled_dot_product_attention(
     n_heads: usize,
     seq_len: usize,
     head_dim: usize,
-    allocator: *const std.mem.Allocator,
+    allocator: std.mem.Allocator,
 ) ![]f32 {
     const batch_size = k.len / (n_heads * seq_len * head_dim);
 
@@ -309,8 +309,9 @@ pub fn scaled_dot_product_attention(
     return outputs;
 }
 
-pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: *const std.mem.Allocator) ![]dtype {
-    var n_elements: usize = @alignOf(dtype);
+pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: std.mem.Allocator) ![]dtype {
+    const align_dtype = @alignOf(dtype);
+    var n_elements: usize = align_dtype;
     for (shape) |item| {
         n_elements *= item;
     }
@@ -320,5 +321,5 @@ pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type,
 
     var tensor = try allocator.alloc(u8, n_elements);
     _ = try fd.readAll(tensor);
-    return std.mem.bytesAsSlice(dtype, @alignCast(@alignOf(dtype), tensor));
+    return std.mem.bytesAsSlice(dtype, @alignCast(align_dtype, tensor));
 }
