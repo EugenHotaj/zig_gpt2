@@ -47,7 +47,7 @@ test "Linear" {
     );
     defer allocator.free(expected);
 
-    const linear = ops.Linear(in_features, out_features).init(weight, bias);
+    const linear = ops.Linear.init(in_features, out_features, weight, bias);
     const actual = try linear.forward(inputs, &allocator);
     defer allocator.free(actual);
 
@@ -82,7 +82,7 @@ test "Embedding" {
     );
     defer allocator.free(expected);
 
-    const embedding = ops.Embedding(embedding_dim).init(weight);
+    const embedding = ops.Embedding.init(embedding_dim, weight);
     const actual = try embedding.forward(inputs, &allocator);
     defer allocator.free(actual);
 
@@ -123,7 +123,7 @@ test "LayerNorm" {
     );
     defer allocator.free(expected);
 
-    const layer_norm = ops.LayerNorm(in_features).init(weight, bias);
+    const layer_norm = ops.LayerNorm.init(in_features, weight, bias);
     layer_norm.forward(inputs);
     const actual = inputs;
 
@@ -167,9 +167,10 @@ test "CausalSelfAttention.split_qkv" {
     );
     defer allocator.free(expected_v);
 
-    const actual_q = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 0, &allocator);
-    const actual_k = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 1, &allocator);
-    const actual_v = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).split_qkv(inputs, 2, &allocator);
+    const fake_attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, undefined, undefined);
+    const actual_q = try fake_attn.split_qkv(inputs, 0, &allocator);
+    const actual_k = try fake_attn.split_qkv(inputs, 1, &allocator);
+    const actual_v = try fake_attn.split_qkv(inputs, 2, &allocator);
     defer allocator.free(actual_q);
     defer allocator.free(actual_k);
     defer allocator.free(actual_v);
@@ -201,7 +202,8 @@ test "CausalSelfAttention.transpose" {
     );
     defer allocator.free(expected);
 
-    const actual = try ops.CausalSelfAttention(n_heads, seq_len, head_dim).transpose(inputs, &allocator);
+    const fake_attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, undefined, undefined);
+    const actual = try fake_attn.transpose(inputs, &allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -257,12 +259,9 @@ test "CausalSelfAttention.forward" {
     );
     defer allocator.free(expected);
 
-    const attn = ops.CausalSelfAttention(n_heads, seq_len, head_dim).init(
-        c_attn_weight,
-        c_attn_bias,
-        c_proj_weight,
-        c_proj_bias,
-    );
+    const c_attn = ops.Linear.init(n_embed, 3 * n_embed, c_attn_weight, c_attn_bias);
+    const c_proj = ops.Linear.init(n_embed, n_embed, c_proj_weight, c_proj_bias);
+    const attn = ops.CausalSelfAttention.init(n_heads, seq_len, head_dim, c_attn, c_proj);
     const actual = try attn.forward(inputs, &allocator);
     defer allocator.free(actual);
 
