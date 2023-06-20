@@ -22,36 +22,50 @@ test "Linear" {
         "models/test/linear_weight",
         &[_]usize{ in_features, out_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(weight);
     const bias = try ops.load_tensor(
         "models/test/linear_bias",
         &[_]usize{out_features},
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(bias);
     const inputs = try ops.load_tensor(
         "models/test/linear_inputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/linear_outputs",
         &[_]usize{ batch_size, out_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
+    // Test Linear with bias.
     const linear = ops.Linear.init(in_features, out_features, weight, bias);
-    const actual = try linear.forward(inputs, &allocator);
+    const actual = try linear.forward(inputs, allocator);
     defer allocator.free(actual);
-
     try expectTensorsApproxEqual(expected, actual);
+
+    // Test Linear no bias.
+    const expected_no_bias = try ops.load_tensor(
+        "models/test/linear_outputs_no_bias",
+        &[_]usize{ batch_size, out_features },
+        f32,
+        allocator,
+    );
+    defer allocator.free(expected_no_bias);
+
+    const no_bias = ops.Linear.init_no_bias(in_features, out_features, weight);
+    const actual_no_bias = try no_bias.forward(inputs, allocator);
+    defer allocator.free(actual_no_bias);
+    try expectTensorsApproxEqual(expected_no_bias, actual_no_bias);
 }
 
 test "Embedding" {
@@ -64,26 +78,26 @@ test "Embedding" {
         "models/test/embedding_weight",
         &[_]usize{ vocab_size, embedding_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(weight);
     const inputs = try ops.load_tensor(
         "models/test/embedding_inputs",
         &[_]usize{ batch_size, 1 },
         usize,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/embedding_outputs",
         &[_]usize{ batch_size, embedding_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
     const embedding = ops.Embedding.init(embedding_dim, weight);
-    const actual = try embedding.forward(inputs, &allocator);
+    const actual = try embedding.forward(inputs, allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -98,28 +112,28 @@ test "LayerNorm" {
         "models/test/layer_norm_weight",
         &[_]usize{in_features},
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(weight);
     const bias = try ops.load_tensor(
         "models/test/layer_norm_bias",
         &[_]usize{in_features},
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(bias);
     const inputs = try ops.load_tensor(
         "models/test/layer_norm_inputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/layer_norm_outputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
@@ -142,35 +156,35 @@ test "CausalSelfAttention.split_qkv" {
         "models/test/split_inputs",
         &[_]usize{ batch_size, seq_len, 3 * n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     var expected_q = try ops.load_tensor(
         "models/test/split_q",
         &[_]usize{ batch_size, seq_len, n_heads, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected_q);
     var expected_k = try ops.load_tensor(
         "models/test/split_k",
         &[_]usize{ batch_size, seq_len, n_heads, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected_k);
     var expected_v = try ops.load_tensor(
         "models/test/split_v",
         &[_]usize{ batch_size, seq_len, n_heads, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected_v);
 
     const fake_attn = ops.CausalSelfAttention.init(n_heads, n_embed, undefined, undefined);
-    const actual_q = try fake_attn.split_qkv(seq_len, inputs, 0, &allocator);
-    const actual_k = try fake_attn.split_qkv(seq_len, inputs, 1, &allocator);
-    const actual_v = try fake_attn.split_qkv(seq_len, inputs, 2, &allocator);
+    const actual_q = try fake_attn.split_qkv(seq_len, inputs, 0, allocator);
+    const actual_k = try fake_attn.split_qkv(seq_len, inputs, 1, allocator);
+    const actual_v = try fake_attn.split_qkv(seq_len, inputs, 2, allocator);
     defer allocator.free(actual_q);
     defer allocator.free(actual_k);
     defer allocator.free(actual_v);
@@ -192,19 +206,19 @@ test "CausalSelfAttention.transpose" {
         "models/test/transpose_inputs",
         &[_]usize{ batch_size, seq_len, n_heads, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     var expected = try ops.load_tensor(
         "models/test/transpose_outputs",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
     const fake_attn = ops.CausalSelfAttention.init(n_heads, n_embed, undefined, undefined);
-    const actual = try fake_attn.transpose(seq_len, inputs, &allocator);
+    const actual = try fake_attn.transpose(seq_len, inputs, allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -222,48 +236,48 @@ test "CausalSelfAttention.forward" {
         "models/test/attn_inputs",
         &[_]usize{ batch_size, seq_len, n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     var c_attn_weight = try ops.load_tensor(
         "models/test/attn_c_attn_weight",
         &[_]usize{ n_embed, 3 * n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(c_attn_weight);
     var c_attn_bias = try ops.load_tensor(
         "models/test/attn_c_attn_bias",
         &[_]usize{3 * n_embed},
         f32,
-        &allocator,
+        allocator,
     );
     var c_proj_weight = try ops.load_tensor(
         "models/test/attn_c_proj_weight",
         &[_]usize{ n_embed, n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(c_proj_weight);
     var c_proj_bias = try ops.load_tensor(
         "models/test/attn_c_proj_bias",
         &[_]usize{n_embed},
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(c_proj_bias);
     var expected = try ops.load_tensor(
         "models/test/attn_outputs",
         &[_]usize{ batch_size, seq_len, n_embed },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
     const c_attn = ops.Linear.init(n_embed, 3 * n_embed, c_attn_weight, c_attn_bias);
     const c_proj = ops.Linear.init(n_embed, n_embed, c_proj_weight, c_proj_bias);
     const attn = ops.CausalSelfAttention.init(n_heads, n_embed, c_attn, c_proj);
-    const actual = try attn.forward(seq_len, inputs, &allocator);
+    const actual = try attn.forward(seq_len, inputs, allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
@@ -278,14 +292,14 @@ test "gelu" {
         "models/test/gelu_inputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/gelu_outputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
@@ -304,14 +318,14 @@ test "softmax" {
         "models/test/softmax_inputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/softmax_outputs",
         &[_]usize{ batch_size, in_features },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
@@ -332,21 +346,21 @@ test "scaled_dot_product_attention" {
         "models/test/sdpa_q",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(q);
     const k = try ops.load_tensor(
         "models/test/sdpa_k",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(k);
     const v = try ops.load_tensor(
         "models/test/sdpa_v",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(v);
 
@@ -354,11 +368,19 @@ test "scaled_dot_product_attention" {
         "models/test/sdpa_outputs",
         &[_]usize{ batch_size, n_heads, seq_len, head_dim },
         f32,
-        &allocator,
+        allocator,
     );
     defer allocator.free(expected);
 
-    const actual = try ops.scaled_dot_product_attention(q, k, v, n_heads, seq_len, head_dim, &allocator);
+    const actual = try ops.scaled_dot_product_attention(
+        q,
+        k,
+        v,
+        n_heads,
+        seq_len,
+        head_dim,
+        allocator,
+    );
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);

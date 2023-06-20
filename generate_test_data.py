@@ -8,15 +8,22 @@ from torch import nn
 name_to_tensor = {}
 
 # Generate Linear.
-linear = nn.Linear(in_features=768, out_features=4 * 768)
 inputs = torch.randn(3, 768)
+
+linear = nn.Linear(in_features=768, out_features=4 * 768)
 outputs = linear(inputs)
+
+linear_no_bias = nn.Linear(in_features=768, out_features=4 * 768, bias=False)
+linear_no_bias.weight.data = linear.weight.data
+outputs_no_bias = linear_no_bias(inputs)
+
 name_to_tensor.update(
     {
         "linear_weight": linear.weight,
         "linear_bias": linear.bias,
         "linear_inputs": inputs,
         "linear_outputs": outputs,
+        "linear_outputs_no_bias": outputs_no_bias,
     }
 )
 

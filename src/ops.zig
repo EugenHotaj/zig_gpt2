@@ -8,12 +8,26 @@ pub const Linear = struct {
     weight: []const f32, // Weights must be provided in *column major* order!
     bias: []const f32,
 
+    // Fields below are private and should not be set directly.
+    use_bias: bool,
+
     pub fn init(in_features: usize, out_features: usize, weight: []const f32, bias: []const f32) Self {
         return Self{
             .in_features = in_features,
             .out_features = out_features,
+            .use_bias = true,
             .weight = weight,
             .bias = bias,
+        };
+    }
+
+    pub fn init_no_bias(in_features: usize, out_features: usize, weight: []const f32) Self {
+        return Self{
+            .in_features = in_features,
+            .out_features = out_features,
+            .use_bias = false,
+            .weight = weight,
+            .bias = undefined,
         };
     }
 
@@ -28,7 +42,9 @@ pub const Linear = struct {
                     const w: f64 = self.weight[o * self.in_features + i];
                     sum += x * w;
                 }
-                sum += self.bias[o];
+                if (self.use_bias) {
+                    sum += self.bias[o];
+                }
                 outputs[b * self.out_features + o] = @floatCast(f32, sum);
             }
         }
