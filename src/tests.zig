@@ -3,12 +3,19 @@ const ops = @import("ops.zig");
 
 pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !void {
     for (0..expected.len) |i| {
-        try std.testing.expectApproxEqAbs(
-            expected[i],
-            actual[i],
-            // TODO(eugenhotaj): Can we push the precision to 1e-7?
-            5e-7,
-        );
+        if (@fabs(expected[i]) < 1e-3) {
+            try std.testing.expectApproxEqAbs(
+                expected[i],
+                actual[i],
+                2e-7,
+            );
+        } else {
+            try std.testing.expectApproxEqRel(
+                expected[i],
+                actual[i],
+                @sqrt(std.math.floatEps(f32)),
+            );
+        }
     }
 }
 
@@ -83,7 +90,7 @@ test "Embedding" {
     defer allocator.free(weight);
     const inputs = try ops.load_tensor(
         "models/test/embedding_inputs",
-        &[_]usize{ batch_size, 1 },
+        &[_]usize{batch_size},
         usize,
         allocator,
     );

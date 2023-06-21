@@ -163,7 +163,7 @@ def load_layernorm(module: nn.LayerNorm, name: str) -> None:
         module.bias.data = torch.tensor(tensor)
 
 
-def load_attention(module: CausalSelfAttention, layer: int, n_embd: int) -> int:
+def load_attention(module: CausalSelfAttention, layer: int, n_embd: int) -> None:
     load_linear(module.c_attn, f"h{layer}-attn-c_attn", n_embd, 3 * n_embd)
     load_linear(module.c_proj, f"h{layer}-attn-c_proj", n_embd, n_embd)
 
@@ -180,27 +180,30 @@ def load_block(module: Block, layer: int, n_embd: int) -> None:
     load_mlp(module.mlp, layer, n_embd)
 
 
+def load_embedding(
+    module: nn.Embedding, name: str, vocab_size: int, n_embd: int
+) -> None:
+    with open(f"models/124M/raw/model-{name}", "rb") as file_:
+        tensor = np.frombuffer(file_.read(), dtype=np.float32)
+        tensor = torch.tensor(tensor).reshape(vocab_size, n_embd)
+        module.weight.data = tensor
+
+
 def load_gpt(module: GPT, config: GPTConfig) -> None:
-    with open(f"models/124M/raw/model-wte", "rb") as file_:
-        tensor = np.frombuffer(file_.read(), dtype=np.float32)
-        tensor = torch.tensor(tensor).reshape(config.vocab_size, config.n_embd)
-        module.transformer.wte.data = tensor
-        module.lm_head.weigth = tensor.T
-    with open(f"models/124M/raw/model-wpe", "rb") as file_:
-        tensor = np.frombuffer(file_.read(), dtype=np.float32)
-        tensor = torch.tensor(tensor).reshape(config.block_size, config.n_embd)
-        module.transformer.wte.data = tensor
+    load_embedding(module.transformer.wte, "wte", config.vocab_size, config.n_embd)
+    load_embedding(module.transformer.wpe, "wpe", config.block_size, config.n_embd)
     for i in range(config.n_layer):
         load_block(module.transformer.h[i], i, config.n_embd)
     load_layernorm(module.transformer.ln_f, "ln_f")
+    # Loading wte should automatically load lm_head since they point to the same tensor.
+    assert module.lm_head.weight is module.transformer.wte.weight
 
 
 gpt_config = GPTConfig()
 gpt = GPT(gpt_config)
 load_gpt(gpt, gpt_config)
 inputs = torch.randint(0, gpt_config.vocab_size, (3, 5))
-inputs = gpt.transformer.wte(inputs)
-outputs = gpt.transformer.h[0](inputs)
+outputs = gpt(inputs)
 name_to_tensor = {
     "gpt_inputs": inputs,
     "gpt_outputs": outputs,

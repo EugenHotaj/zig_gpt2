@@ -64,7 +64,7 @@ pub const Embedding = struct {
 
     pub fn forward(self: Self, idxs: []const usize, allocator: std.mem.Allocator) ![]f32 {
         var embeddings = try allocator.alloc(f32, idxs.len * self.emb_dim);
-        for (0..idxs) |i| {
+        for (0..idxs.len) |i| {
             const idx = idxs[i];
             // TODO(eugenhotaj): There is no reason to copy memory here. We should
             // instead return views (pointers) to the embeddings.

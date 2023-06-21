@@ -1,5 +1,6 @@
 const std = @import("std");
 const ops = @import("ops.zig");
+const expectTensorsApproxEqual = @import("tests.zig").expectTensorsApproxEqual;
 
 const GPTConfig = struct {
     const Self = @This();
@@ -78,21 +79,43 @@ const GPT = struct {
     wpe: ops.Embedding,
     h: []const Block,
     ln_f: ops.LayerNorm,
+    lm_head: ops.Linear,
 
-    pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm) Self {
-        return Self{ .config = config, .wte = wte, .wpe = wpe, .h = h, .ln_f = ln_f };
+    pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm, lm_head: ops.Linear) Self {
+        return Self{ .config = config, .wte = wte, .wpe = wpe, .h = h, .ln_f = ln_f, .lm_head = lm_head };
+    }
+
+    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, allocator: std.mem.Allocator) ![]f32 {
+        const batch_size = inputs.len / seq_len;
+
+        // Compute embeddings (token + positional).
+        var pos = try allocator.alloc(usize, seq_len);
+        for (0..seq_len) |i| {
+            pos[i] = i;
+        }
+        const pos_emb = try self.wpe.forward(pos, allocator);
+        var tok_emb = try self.wte.forward(inputs, allocator);
+        for (0..batch_size) |b| {
+            for (0..seq_len) |s| {
+                for (0..self.config.n_embed) |i| {
+                    const batch_offset = (b * seq_len * self.config.n_embed);
+                    const seq_offset = (s * self.config.n_embed);
+                    tok_emb[batch_offset + seq_offset + i] += pos_emb[seq_offset + i];
+                }
+            }
+        }
+
+        // Forward the transformer.
+        var x = tok_emb;
+        for (0..self.h.len) |i| {
+            x = try self.h[i].forward(seq_len, x, allocator);
+        }
+        self.ln_f.forward(x);
+
+        // Return logits.
+        return self.lm_head.forward(x, allocator);
     }
 };
-
-pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !void {
-    for (0..expected.len) |i| {
-        try std.testing.expectApproxEqAbs(
-            expected[i],
-            actual[i],
-            7e-5,
-        );
-    }
-}
 
 pub fn load_linear(
     name: []const u8,
@@ -143,6 +166,18 @@ pub fn load_layer_norm(
     return ops.LayerNorm.init(n_features, weight, bias);
 }
 
+pub fn load_embedding(name: []const u8, vocab_size: usize, emb_dim: usize, allocator: std.mem.Allocator) !ops.Embedding {
+    const path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}", .{name});
+    defer allocator.free(path);
+    var weight = try ops.load_tensor(
+        path,
+        &[_]usize{ vocab_size, emb_dim },
+        f32,
+        allocator,
+    );
+    return ops.Embedding.init(emb_dim, weight);
+}
+
 pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Allocator) !Block {
     const ln_1_name = try std.fmt.allocPrint(allocator, "h{any}-ln_1", .{layer_idx});
     defer allocator.free(ln_1_name);
@@ -173,17 +208,28 @@ pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Alloca
     return Block.init(ln_1, attn, ln_2, mlp);
 }
 
+pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
+    const wte = try load_embedding("wte", config.vocab_size, config.n_embed, allocator);
+    const wpe = try load_embedding("wpe", config.context_size, config.n_embed, allocator);
+    var h = try allocator.alloc(Block, config.n_layer);
+    for (0..h.len) |i| {
+        h[i] = try load_block(i, config, allocator);
+    }
+    const ln_f = try load_layer_norm("ln_f", config.n_embed, allocator);
+    const lm_head = ops.Linear.init_no_bias(config.n_embed, config.vocab_size, wte.weight);
+    return GPT.init(config, wte, wpe, h, ln_f, lm_head);
+}
+
 pub fn main() !void {
     const batch_size = 3;
     const seq_len = 5;
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
     const allocator = std.heap.page_allocator;
-    const block = try load_block(0, config, allocator);
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
-        &[_]usize{ batch_size, seq_len, config.n_embed },
-        f32,
+        &[_]usize{ batch_size, seq_len },
+        usize,
         allocator,
     );
     defer allocator.free(inputs);
@@ -195,7 +241,8 @@ pub fn main() !void {
     );
     defer allocator.free(expected);
 
-    const actual = try block.forward(seq_len, inputs, allocator);
+    const gpt = try load_gpt(config, allocator);
+    const actual = try gpt.forward(seq_len, inputs, allocator);
     defer allocator.free(actual);
 
     try expectTensorsApproxEqual(expected, actual);
