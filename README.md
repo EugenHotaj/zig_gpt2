@@ -14,7 +14,7 @@ TODOs:
 * ✅ Implement the full GPT model.
 * Implement sampling from the model.
 * Implement token encoding / decoding.
-* Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
+* ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
 
 Wishlist:
 * Replace `arrays` with `Vectors`.
