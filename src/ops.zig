@@ -31,9 +31,8 @@ pub const Linear = struct {
         };
     }
 
-    pub fn forward(self: Self, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
+    pub fn forward(self: Self, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / self.in_features;
-        var outputs = try allocator.alloc(f32, batch_size * self.out_features);
         for (0..batch_size) |b| {
             for (0..self.out_features) |o| {
                 var sum: f64 = 0.0;
@@ -48,7 +47,6 @@ pub const Linear = struct {
                 outputs[b * self.out_features + o] = @floatCast(f32, sum);
             }
         }
-        return outputs;
     }
 };
 
@@ -62,8 +60,7 @@ pub const Embedding = struct {
         return Self{ .emb_dim = emb_dim, .weight = weight };
     }
 
-    pub fn forward(self: Self, idxs: []const usize, allocator: std.mem.Allocator) ![]f32 {
-        var embeddings = try allocator.alloc(f32, idxs.len * self.emb_dim);
+    pub fn forward(self: Self, idxs: []const usize, embeddings: []f32) void {
         for (0..idxs.len) |i| {
             const idx = idxs[i];
             // TODO(eugenhotaj): There is no reason to copy memory here. We should
@@ -74,7 +71,6 @@ pub const Embedding = struct {
                 self.weight[self.emb_dim * idx .. self.emb_dim * (idx + 1)],
             );
         }
-        return embeddings;
     }
 };
 
@@ -135,37 +131,29 @@ pub const CausalSelfAttention = struct {
         };
     }
 
-    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
-        const qkv = try self.c_attn.forward(inputs, allocator);
-        const q = try self.transpose(
-            seq_len,
-            try self.split_qkv(seq_len, qkv, 0, allocator),
-            allocator,
-        );
-        const k = try self.transpose(
-            seq_len,
-            try self.split_qkv(seq_len, qkv, 1, allocator),
-            allocator,
-        );
-        const v = try self.transpose(
-            seq_len,
-            try self.split_qkv(seq_len, qkv, 2, allocator),
-            allocator,
-        );
-        const outputs = try self.untranspose(
-            seq_len,
-            try scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                self.n_heads,
-                seq_len,
-                self.head_dim,
-                allocator,
-            ),
-            allocator,
-        );
-        return self.c_proj.forward(outputs, allocator);
+    pub fn forward(
+        self: Self,
+        seq_len: usize,
+        inputs: []const f32,
+        outputs: []f32,
+        // Parameters below are intermediate buffers used inside the function.
+        _qkv: []f32,
+        _q: []f32,
+        _k: []f32,
+        _v: []f32,
+        _attn: []f32,
+    ) void {
+        self.c_attn.forward(inputs, _qkv);
+        self.split_qkv(seq_len, _qkv, 0, outputs);
+        self.transpose(seq_len, outputs, _q);
+        self.split_qkv(seq_len, _qkv, 1, outputs);
+        self.transpose(seq_len, outputs, _k);
+        self.split_qkv(seq_len, _qkv, 2, outputs);
+        self.transpose(seq_len, outputs, _v);
+        scaled_dot_product_attention(_q, _k, _v, self.n_heads, seq_len, self.head_dim, outputs, _attn);
+        // Hack: Store untranspose requst in q so we don't need to keep another buffer.
+        self.untranspose(seq_len, outputs, _q);
+        self.c_proj.forward(_q, outputs);
     }
 
     // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
@@ -175,11 +163,10 @@ pub const CausalSelfAttention = struct {
         seq_len: usize,
         inputs: []const f32,
         split_idx: usize,
-        allocator: std.mem.Allocator,
-    ) ![]f32 {
+        outputs: []f32,
+    ) void {
         const n_embed_ = 3 * self.n_embed;
         const batch_size = inputs.len / (seq_len * n_embed_);
-        var outputs = try allocator.alloc(f32, inputs.len / 3);
         for (0..batch_size) |b| {
             for (0..seq_len) |r| {
                 const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed);
@@ -191,13 +178,11 @@ pub const CausalSelfAttention = struct {
                 );
             }
         }
-        return outputs;
     }
 
     // Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
-    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
+    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / (seq_len * self.n_embed);
-        var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
             for (0..self.n_heads) |h| {
                 for (0..seq_len) |r| {
@@ -211,13 +196,11 @@ pub const CausalSelfAttention = struct {
                 }
             }
         }
-        return outputs;
     }
 
     // Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
-    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
+    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / (seq_len * self.n_embed);
-        var outputs = try allocator.alloc(f32, inputs.len);
         for (0..batch_size) |b| {
             for (0..seq_len) |r| {
                 for (0..self.n_heads) |h| {
@@ -231,7 +214,6 @@ pub const CausalSelfAttention = struct {
                 }
             }
         }
-        return outputs;
     }
 };
 
@@ -277,13 +259,10 @@ pub fn scaled_dot_product_attention(
     n_heads: usize,
     seq_len: usize,
     head_dim: usize,
-    allocator: std.mem.Allocator,
-) ![]f32 {
+    outputs: []f32,
+    _attn: []f32, // Intermediate buffers used inside the function.
+) void {
     const batch_size = k.len / (n_heads * seq_len * head_dim);
-
-    var attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
-    defer allocator.free(attn);
-    var outputs = try allocator.alloc(f32, batch_size * n_heads * seq_len * head_dim);
     for (0..batch_size) |b| {
         for (0..n_heads) |h| {
             const in_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
@@ -295,7 +274,7 @@ pub fn scaled_dot_product_attention(
                     // For masked elements, short-circut the matmul and directly apply
                     // the mask.
                     if (c > r) {
-                        attn[out_offset + r * seq_len + c] = -std.math.inf(f32);
+                        _attn[out_offset + r * seq_len + c] = -std.math.inf(f32);
                         continue;
                     }
 
@@ -305,24 +284,23 @@ pub fn scaled_dot_product_attention(
                         sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
                     }
                     const value = sum / @sqrt(@intToFloat(f64, head_dim));
-                    attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
+                    _attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
                 }
                 const offset = out_offset + r * seq_len;
-                softmax(seq_len, attn[offset .. offset + seq_len]);
+                softmax(seq_len, _attn[offset .. offset + seq_len]);
 
                 // Compute attn @ v.
                 for (0..head_dim) |c| {
                     var sum: f64 = 0.0;
                     for (0..seq_len) |i| {
                         // TODO(eugenhotaj): Not cache friendly.
-                        sum += attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
+                        sum += _attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
                     }
                     outputs[in_offset + r * head_dim + c] = @floatCast(f32, sum);
                 }
             }
         }
     }
-    return outputs;
 }
 
 pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: std.mem.Allocator) ![]dtype {

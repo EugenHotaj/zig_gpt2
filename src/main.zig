@@ -22,6 +22,54 @@ const GPTConfig = struct {
     }
 };
 
+pub const OutputBuffers = struct {
+    const Self = @This();
+
+    pos: []usize,
+    pos_emb: []f32,
+    x: []f32,
+    o: []f32,
+    logits: []f32,
+
+    // Intermediate buffers.
+    _h: []f32,
+    _3xh: []f32,
+    _4xh: []f32,
+    _attn: []f32,
+
+    allocator: std.mem.Allocator,
+
+    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator) !Self {
+        var pos = try allocator.alloc(usize, seq_len);
+        for (0..seq_len) |i| {
+            pos[i] = i;
+        }
+        return Self{
+            .pos = pos,
+            .pos_emb = try allocator.alloc(f32, seq_len * config.n_embed),
+            .x = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
+            .o = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
+            .logits = try allocator.alloc(f32, batch_size * seq_len * config.vocab_size),
+            ._h = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
+            ._3xh = try allocator.alloc(f32, batch_size * seq_len * 3 * config.n_embed),
+            ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
+            ._attn = try allocator.alloc(f32, batch_size * config.n_heads * seq_len * seq_len),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: Self) void {
+        self.allocator.free(self.pos);
+        self.allocator.free(self.pos_emb);
+        self.allocator.free(self.x);
+        self.allocator.free(self.o);
+        self.allocator.free(self._h);
+        self.allocator.free(self._3xh);
+        self.allocator.free(self._4xh);
+        self.allocator.free(self._attn);
+    }
+};
+
 const MLP = struct {
     const Self = @This();
 
@@ -32,10 +80,11 @@ const MLP = struct {
         return MLP{ .c_fc = c_fc, .c_proj = c_proj };
     }
 
-    pub fn forward(self: Self, inputs: []const f32, allocator: std.mem.Allocator) ![]f32 {
-        var x: []f32 = try self.c_fc.forward(inputs, allocator);
-        ops.gelu(x);
-        return self.c_proj.forward(x, allocator);
+    /// Computes the forward pass and writes the result to outputs.o.
+    pub fn forward(self: Self, inputs: []const f32, outputs: OutputBuffers) void {
+        self.c_fc.forward(inputs, outputs._4xh);
+        ops.gelu(outputs._4xh);
+        self.c_proj.forward(outputs._4xh, outputs.o);
     }
 };
 
@@ -51,23 +100,35 @@ const Block = struct {
         return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
     }
 
-    pub fn forward(self: Self, seq_len: usize, inputs: []f32, allocator: std.mem.Allocator) ![]f32 {
+    /// Computes the forward pass and writes the result to both outputs.x and outputs.o. This
+    /// enables sequentially calling multiple Block.forwards() in a row without having to copy
+    /// memory.
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, outputs: OutputBuffers) void {
         // Create a copy of x for residual computation.
-        var x = try allocator.alloc(f32, inputs.len);
-        std.mem.copyForwards(f32, x, inputs);
+        std.mem.copyForwards(f32, outputs._h, inputs);
 
-        self.ln_1.forward(x);
-        x = try self.attn.forward(seq_len, x, allocator);
-        for (0..x.len) |i| {
-            x[i] += inputs[i];
-            inputs[i] = x[i];
+        self.ln_1.forward(outputs._h);
+        self.attn.forward(
+            seq_len,
+            outputs._h,
+            outputs.o,
+            outputs._3xh,
+            // Using _4xh as temporary buffer since _q, _k, _v are thrown away.
+            outputs._4xh[0..inputs.len],
+            outputs._4xh[inputs.len .. 2 * inputs.len],
+            outputs._4xh[2 * inputs.len .. 3 * inputs.len],
+            outputs._attn,
+        );
+        for (0..outputs.o) |i| {
+            outputs._h[i] = outputs.o[i] + inputs[i];
+            outputs.x[i] = outputs._h[i];
         }
-        self.ln_2.forward(x);
-        x = try self.mlp.forward(x, allocator);
-        for (0..x.len) |i| {
-            x[i] += inputs[i];
+        self.ln_2.forward(outputs._h);
+        self.mlp.forward(outputs._h, outputs);
+        for (0..outputs.o) |i| {
+            outputs.o[i] += outputs.x[i];
+            outputs.x[i] = outputs.o[i];
         }
-        return x;
     }
 };
 
@@ -85,35 +146,32 @@ const GPT = struct {
         return Self{ .config = config, .wte = wte, .wpe = wpe, .h = h, .ln_f = ln_f, .lm_head = lm_head };
     }
 
-    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, allocator: std.mem.Allocator) ![]f32 {
+    /// Computes the forward pass and writes the result in outputs.logits.
+    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, outputs: OutputBuffers) void {
         const batch_size = inputs.len / seq_len;
 
         // Compute embeddings (token + positional).
-        var pos = try allocator.alloc(usize, seq_len);
-        for (0..seq_len) |i| {
-            pos[i] = i;
-        }
-        const pos_emb = try self.wpe.forward(pos, allocator);
-        var tok_emb = try self.wte.forward(inputs, allocator);
+        self.wpe.forward(outputs.pos, outputs.pos_emb);
+        self.wte.forward(inputs, outputs.x);
         for (0..batch_size) |b| {
             for (0..seq_len) |s| {
                 for (0..self.config.n_embed) |i| {
                     const batch_offset = (b * seq_len * self.config.n_embed);
                     const seq_offset = (s * self.config.n_embed);
-                    tok_emb[batch_offset + seq_offset + i] += pos_emb[seq_offset + i];
+                    outputs.x[batch_offset + seq_offset + i] += outputs.pos_emb[seq_offset + i];
                 }
             }
         }
 
         // Forward the transformer.
-        var x = tok_emb;
         for (0..self.h.len) |i| {
-            x = try self.h[i].forward(seq_len, x, allocator);
+            self.h[i].forward(seq_len, outputs.x, outputs);
+            std.debug.print("layer: {any}\n", .{i});
         }
-        self.ln_f.forward(x);
+        self.ln_f.forward(outputs.x);
 
-        // Return logits.
-        return self.lm_head.forward(x, allocator);
+        // Compute logits.
+        self.lm_head.forward(outputs.x, outputs.logits);
     }
 };
 
@@ -240,10 +298,10 @@ pub fn main() !void {
         allocator,
     );
     defer allocator.free(expected);
-
+    var outputs = try OutputBuffers.init(batch_size, seq_len, config, allocator);
+    defer outputs.deinit();
     const gpt = try load_gpt(config, allocator);
-    const actual = try gpt.forward(seq_len, inputs, allocator);
-    defer allocator.free(actual);
+    gpt.forward(seq_len, inputs, outputs);
 
-    try expectTensorsApproxEqual(expected, actual);
+    try expectTensorsApproxEqual(expected, outputs.logits);
 }
