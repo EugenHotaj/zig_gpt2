@@ -57,17 +57,6 @@ pub const OutputBuffers = struct {
             .allocator = allocator,
         };
     }
-
-    pub fn deinit(self: Self) void {
-        self.allocator.free(self.pos);
-        self.allocator.free(self.pos_emb);
-        self.allocator.free(self.x);
-        self.allocator.free(self.o);
-        self.allocator.free(self._h);
-        self.allocator.free(self._3xh);
-        self.allocator.free(self._4xh);
-        self.allocator.free(self._attn);
-    }
 };
 
 const MLP = struct {
@@ -267,7 +256,7 @@ pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Alloca
 }
 
 pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
-    const wte = try load_embedding("wte", config.vocab_size, config.n_embed, allocator);
+    var wte = try load_embedding("wte", config.vocab_size, config.n_embed, allocator);
     const wpe = try load_embedding("wpe", config.context_size, config.n_embed, allocator);
     var h = try allocator.alloc(Block, config.n_layer);
     for (0..h.len) |i| {
@@ -283,23 +272,23 @@ pub fn main() !void {
     const seq_len = 5;
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
         &[_]usize{ batch_size, seq_len },
         usize,
         allocator,
     );
-    defer allocator.free(inputs);
     const expected = try ops.load_tensor(
         "models/test/gpt_outputs",
         &[_]usize{ batch_size, seq_len, config.n_embed },
         f32,
         allocator,
     );
-    defer allocator.free(expected);
     var outputs = try OutputBuffers.init(batch_size, seq_len, config, allocator);
-    defer outputs.deinit();
     const gpt = try load_gpt(config, allocator);
     gpt.forward(seq_len, inputs, outputs);
 

@@ -304,16 +304,14 @@ pub fn scaled_dot_product_attention(
 }
 
 pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type, allocator: std.mem.Allocator) ![]dtype {
-    const align_dtype = @alignOf(dtype);
-    var n_elements: usize = align_dtype;
+    var n_elements: usize = 1;
     for (shape) |item| {
         n_elements *= item;
     }
+    var tensor = try allocator.alloc(dtype, n_elements);
 
     const fd = try std.fs.cwd().openFile(path, .{});
     defer fd.close();
-
-    var tensor = try allocator.alloc(u8, n_elements);
-    _ = try fd.readAll(tensor);
-    return std.mem.bytesAsSlice(dtype, @alignCast(align_dtype, tensor));
+    _ = try fd.readAll(std.mem.sliceAsBytes(tensor));
+    return tensor;
 }
