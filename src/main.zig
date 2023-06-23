@@ -155,7 +155,6 @@ const GPT = struct {
         // Forward the transformer.
         for (0..self.h.len) |i| {
             self.h[i].forward(seq_len, outputs.x, outputs);
-            std.debug.print("layer: {any}\n", .{i});
         }
         self.ln_f.forward(outputs.x);
 
