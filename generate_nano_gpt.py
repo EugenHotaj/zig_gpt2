@@ -137,12 +137,8 @@ class GPT(nn.Module):
             x = block(x)
         x = self.transformer.ln_f(x)
 
-        # TODO(eugenhotaj): inference-time mini-optimization: only forward the lm_head
-        # on the very last position
-        # logits = self.lm_head(x[:, [-1], :]) # Using [-1] to preserve the time dim.
-        logits = self.lm_head(x)
-
-        return logits
+        # Mini-optimization: Only forward the lm_head on the very last position.
+        return self.lm_head(x[:, [-1], :])  # Using [-1] to preserve the time dim.
 
     @torch.no_grad()
     def generate(self, idx, new_tokens, temp=0.8):
@@ -221,19 +217,21 @@ encoded = encoder.encode(
     "Marcus Aurelius said thus: ", allowed_special={"<|endoftext|>"}
 )
 inputs = torch.tensor(encoded).view((1, -1))
-
-outputs = gpt.generate(inputs, 10)
-outputs = encoder.decode(outputs.tolist()[0])
-print(outputs)
+outputs = gpt(inputs)
 # fmt: off
 # Zig outputs:
-print(encoder.decode([35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 5246, 14931, 314, 14960, 616, 29644, 357, 34470, 5106]))
+print(
+    encoder.decode(list(
+        { 35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 40, 12472, 345, 407, 284, 766, 340, 14590, 345 }
+
+    ))
+)
 # fmt: on
 
 name_to_tensor = {
     "gpt_inputs": inputs,
+    "gpt_outputs": outputs,
 }
-
 for name, tensor in name_to_tensor.items():
     if not os.path.exists(f"models/test/{name}"):
         with open(f"models/test/{name}", "wb") as file_:

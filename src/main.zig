@@ -49,7 +49,7 @@ pub const OutputBuffers = struct {
             .pos_emb = try allocator.alloc(f32, seq_len * config.n_embed),
             .x = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
             .o = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
-            .logits = try allocator.alloc(f32, batch_size * seq_len * config.vocab_size),
+            .logits = try allocator.alloc(f32, batch_size * config.vocab_size),
             ._h = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
             ._3xh = try allocator.alloc(f32, batch_size * seq_len * 3 * config.n_embed),
             ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
@@ -130,10 +130,8 @@ const GPT = struct {
     h: []const Block,
     ln_f: ops.LayerNorm,
     lm_head: ops.Linear,
-    random: std.rand.Random,
 
     pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm, lm_head: ops.Linear) Self {
-        var rng = std.rand.DefaultPrng.init(42);
         return Self{
             .config = config,
             .wte = wte,
@@ -141,7 +139,6 @@ const GPT = struct {
             .h = h,
             .ln_f = ln_f,
             .lm_head = lm_head,
-            .random = rng.random(),
         };
     }
 
@@ -169,7 +166,14 @@ const GPT = struct {
         self.ln_f.forward(outputs.x);
 
         // Compute logits.
-        self.lm_head.forward(outputs.x, outputs.logits);
+        // Mini-optimization: Only forward the lm_head on the very last position.
+        for (0..batch_size) |b| {
+            const in_offset = b * seq_len * self.config.n_embed;
+            self.lm_head.forward(
+                outputs.x[in_offset + (seq_len - 1) * self.config.n_embed .. in_offset + seq_len * self.config.n_embed],
+                outputs.logits[b * self.config.vocab_size .. (b + 1) * self.config.vocab_size],
+            );
+        }
     }
 
     pub fn generate(
@@ -191,16 +195,15 @@ const GPT = struct {
 
         const logits_dim = self.config.vocab_size;
         for (input_tokens..total_tokens) |s| {
-            self.forward(s, inputs, outputs);
-            var logits = outputs.logits[(s - 1) * logits_dim .. s * logits_dim];
-            for (0..logits.len) |i| {
-                logits[i] /= temp;
+            self.forward(s, inputs[0..s], outputs);
+            for (0..outputs.logits.len) |i| {
+                outputs.logits[i] /= temp;
             }
-            ops.softmax(logits_dim, logits);
+            ops.softmax(logits_dim, outputs.logits);
 
             var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
             var random = rng.random();
-            inputs[s] = random.weightedIndex(f32, logits);
+            inputs[s] = random.weightedIndex(f32, outputs.logits);
         }
     }
 };
@@ -326,8 +329,20 @@ pub fn main() !void {
         usize,
         allocator,
     );
+    const expected = try ops.load_tensor(
+        "models/test/gpt_outputs",
+        &[_]usize{ batch_size, 1, config.vocab_size },
+        f32,
+        allocator,
+    );
     var outputs = try OutputBuffers.init(batch_size, input_tokens + max_tokens, config, allocator);
+
+    // Ensure that forwarding the model produces the same outputs as PyTorch.
     const gpt = try load_gpt(config, allocator);
+    gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], outputs);
+    try expectTensorsApproxEqual(expected, outputs.logits);
+
+    // Generate.
     try gpt.generate(input_tokens, max_tokens, temp, inputs, outputs);
     std.debug.print("{any}\n", .{inputs});
 }
