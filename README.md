@@ -24,7 +24,7 @@ TODOs:
 * ✅ Implement basic ops: Embedding, Linear, LayerNorm, GELU, Softmax, CausalSelfAttention.
 * ✅ Implement transformer modules: MLP, Transformer block.
 * ✅ Implement the full GPT model.
-* Implement sampling from the model.
+* ✅ Implement sampling from the model.
 * Implement token encoding / decoding.
 * ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
 
