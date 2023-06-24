@@ -3,3 +3,4 @@ zig-out/
 models/
 .venv/
 .DS_Store
+main*

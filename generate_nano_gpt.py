@@ -154,11 +154,11 @@ def load_linear(module: nn.Linear, name: str, in_f: int, out_f: int) -> None:
 
 
 def load_layernorm(module: nn.LayerNorm, name: str) -> None:
-    with open(f"models/124M/raw/model-{name}-b", "rb") as file_:
+    with open(f"models/124M/raw/model-{name}-g", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.weight.data = torch.tensor(tensor)
 
-    with open(f"models/124M/raw/model-{name}-g", "rb") as file_:
+    with open(f"models/124M/raw/model-{name}-b", "rb") as file_:
         tensor = np.frombuffer(file_.read(), dtype=np.float32)
         module.bias.data = torch.tensor(tensor)
 

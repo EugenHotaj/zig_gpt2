@@ -193,7 +193,7 @@ pub fn load_layer_norm(
     n_features: usize,
     allocator: std.mem.Allocator,
 ) !ops.LayerNorm {
-    const weight_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-b", .{name});
+    const weight_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-g", .{name});
     defer allocator.free(weight_path);
     var weight = try ops.load_tensor(
         weight_path,
@@ -201,7 +201,7 @@ pub fn load_layer_norm(
         f32,
         allocator,
     );
-    const bias_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-g", .{name});
+    const bias_path = try std.fmt.allocPrint(allocator, "models/124M/raw/model-{s}-b", .{name});
     defer allocator.free(bias_path);
     var bias = try ops.load_tensor(
         bias_path,
