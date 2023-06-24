@@ -15,6 +15,7 @@ import os
 from dataclasses import dataclass
 
 import numpy as np
+import tiktoken
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -111,6 +112,7 @@ class Block(nn.Module):
 class GPT(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.transformer = nn.ModuleDict(
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
@@ -141,6 +143,17 @@ class GPT(nn.Module):
         logits = self.lm_head(x)
 
         return logits
+
+    @torch.no_grad()
+    def generate(self, idx, new_tokens, temp=0.8):
+        assert len(idx) + new_tokens <= self.config.block_size
+
+        for _ in range(new_tokens):
+            logits = self(idx)[:, -1, :] / temp
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        return idx
 
 
 def load_linear(module: nn.Linear, name: str, in_f: int, out_f: int) -> None:
@@ -200,13 +213,25 @@ def load_gpt(module: GPT, config: GPTConfig) -> None:
 
 
 gpt_config = GPTConfig()
-gpt = GPT(gpt_config)
+gpt = GPT(gpt_config).eval()
 load_gpt(gpt, gpt_config)
-inputs = torch.randint(0, gpt_config.vocab_size, (3, 5))
-outputs = gpt(inputs)
+
+encoder = tiktoken.get_encoding("gpt2")
+encoded = encoder.encode(
+    "Marcus Aurelius said thus: ", allowed_special={"<|endoftext|>"}
+)
+inputs = torch.tensor(encoded).view((1, -1))
+
+outputs = gpt.generate(inputs, 10)
+outputs = encoder.decode(outputs.tolist()[0])
+print(outputs)
+# fmt: off
+# Zig outputs:
+print(encoder.decode([35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 5246, 14931, 314, 14960, 616, 29644, 357, 34470, 5106]))
+# fmt: on
+
 name_to_tensor = {
     "gpt_inputs": inputs,
-    "gpt_outputs": outputs,
 }
 
 for name, tensor in name_to_tensor.items():

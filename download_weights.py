@@ -1,3 +1,10 @@
+"""Downloads GPT-2 weights from OpenAI and dumps the tensors in raw binary format.
+
+Weight tensors are transposed so we can easily load them into PyTorch/zig. 
+
+Based on https://github.com/openai/gpt-2/blob/master/download_model.py.
+"""
+
 import os
 
 import numpy as np

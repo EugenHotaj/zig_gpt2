@@ -130,9 +130,19 @@ const GPT = struct {
     h: []const Block,
     ln_f: ops.LayerNorm,
     lm_head: ops.Linear,
+    random: std.rand.Random,
 
     pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm, lm_head: ops.Linear) Self {
-        return Self{ .config = config, .wte = wte, .wpe = wpe, .h = h, .ln_f = ln_f, .lm_head = lm_head };
+        var rng = std.rand.DefaultPrng.init(42);
+        return Self{
+            .config = config,
+            .wte = wte,
+            .wpe = wpe,
+            .h = h,
+            .ln_f = ln_f,
+            .lm_head = lm_head,
+            .random = rng.random(),
+        };
     }
 
     /// Computes the forward pass and writes the result in outputs.logits.
@@ -160,6 +170,38 @@ const GPT = struct {
 
         // Compute logits.
         self.lm_head.forward(outputs.x, outputs.logits);
+    }
+
+    pub fn generate(
+        self: Self,
+        input_tokens: usize,
+        max_tokens: usize,
+        temp: f32,
+        inputs: []usize,
+        outputs: OutputBuffers,
+    ) !void {
+        const total_tokens = input_tokens + max_tokens;
+        if (total_tokens > self.config.context_size) {
+            return error.SequenceTooLong;
+        }
+        // TODO(eugenhotaj): Remove batch size = 1 restrictions.
+        if ((inputs.len / total_tokens) > 1) {
+            return error.BatchSizeTooBig;
+        }
+
+        const logits_dim = self.config.vocab_size;
+        for (input_tokens..total_tokens) |s| {
+            self.forward(s, inputs, outputs);
+            var logits = outputs.logits[(s - 1) * logits_dim .. s * logits_dim];
+            for (0..logits.len) |i| {
+                logits[i] /= temp;
+            }
+            ops.softmax(logits_dim, logits);
+
+            var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
+            var random = rng.random();
+            inputs[s] = random.weightedIndex(f32, logits);
+        }
     }
 };
 
@@ -267,8 +309,11 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
 }
 
 pub fn main() !void {
-    const batch_size = 3;
-    const seq_len = 5;
+    const batch_size = 1;
+    const input_tokens = 8;
+    const max_tokens = 10;
+    const temp = 0.8;
+
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -277,19 +322,12 @@ pub fn main() !void {
     const allocator = arena.allocator();
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
-        &[_]usize{ batch_size, seq_len },
+        &[_]usize{ batch_size, input_tokens + max_tokens },
         usize,
         allocator,
     );
-    const expected = try ops.load_tensor(
-        "models/test/gpt_outputs",
-        &[_]usize{ batch_size, seq_len, config.n_embed },
-        f32,
-        allocator,
-    );
-    var outputs = try OutputBuffers.init(batch_size, seq_len, config, allocator);
+    var outputs = try OutputBuffers.init(batch_size, input_tokens + max_tokens, config, allocator);
     const gpt = try load_gpt(config, allocator);
-    gpt.forward(seq_len, inputs, outputs);
-
-    try expectTensorsApproxEqual(expected, outputs.logits);
+    try gpt.generate(input_tokens, max_tokens, temp, inputs, outputs);
+    std.debug.print("{any}\n", .{inputs});
 }
