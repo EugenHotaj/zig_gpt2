@@ -31,20 +31,38 @@ pub const Linear = struct {
         };
     }
 
+    pub fn _kernel(self: Self, batch_idx: usize, inputs: []const f32, outputs: []f32) void {
+        for (0..self.out_features) |o| {
+            var sum: f64 = 0.0;
+            for (0..self.in_features) |i| {
+                const x: f64 = inputs[batch_idx * self.in_features + i];
+                const w: f64 = self.weight[o * self.in_features + i];
+                sum += x * w;
+            }
+            if (self.use_bias) {
+                sum += self.bias[o];
+            }
+            outputs[batch_idx * self.out_features + o] = @floatCast(f32, sum);
+        }
+    }
+
     pub fn forward(self: Self, inputs: []const f32, outputs: []f32) void {
+        const n_threads: usize = 256;
+        var threads: [n_threads]std.Thread = undefined;
+
         const batch_size = inputs.len / self.in_features;
-        for (0..batch_size) |b| {
-            for (0..self.out_features) |o| {
-                var sum: f64 = 0.0;
-                for (0..self.in_features) |i| {
-                    const x: f64 = inputs[b * self.in_features + i];
-                    const w: f64 = self.weight[o * self.in_features + i];
-                    sum += x * w;
-                }
-                if (self.use_bias) {
-                    sum += self.bias[o];
-                }
-                outputs[b * self.out_features + o] = @floatCast(f32, sum);
+        const n_chunks = batch_size / n_threads + 1;
+        for (0..n_chunks) |c| {
+            const iter = std.math.min(n_threads, batch_size - c * n_threads);
+            for (0..iter) |t| {
+                threads[t] = std.Thread.spawn(
+                    .{},
+                    Self._kernel,
+                    .{ self, c * n_threads + t, inputs, outputs },
+                ) catch undefined;
+            }
+            for (0..iter) |t| {
+                threads[t].join();
             }
         }
     }

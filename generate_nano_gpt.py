@@ -218,13 +218,16 @@ encoded = encoder.encode(
 )
 inputs = torch.tensor(encoded).view((1, -1))
 outputs = gpt(inputs)
+
+generated = gpt.generate(inputs, 10).tolist()[0]
+print(encoder.decode(generated))
+
 # fmt: off
 # Zig outputs:
 print(
-    encoder.decode(list(
-        { 35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 40, 12472, 345, 407, 284, 766, 340, 14590, 345 }
-
-    ))
+    encoder.decode(
+        [ 35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 1, 32, 495, 75, 3754, 11, 262, 655, 2276 ]
+    )
 )
 # fmt: on
 
