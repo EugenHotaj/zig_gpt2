@@ -14,7 +14,8 @@ Build the zig binary and run it on the generated data:
 zig build-exe ./src/main.zig -O ReleaseFast -fstrip -fsingle-threaded -target x86_64-macos
 time ./main
 ```
-The zig binary loads the GPT-2 weights, forwards the same examples, and checks that the output matches PyTorch's.
+The zig binary loads the GPT-2 weights, forwards the same examples, and checks that the output matches PyTorch's. It also
+generates a bunch of tokens.
 
 ---
 
