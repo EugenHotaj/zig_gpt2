@@ -1,7 +1,7 @@
 # zig_inference
 GPT2 inference engine written in Zig. 
 
-The inference engine can run [NanoGPT](https://github.com/karpathy/nanoGPT) **~2x faster than eager PyTorch** (at least on my CPU). 
+The inference engine can run [NanoGPT](https://github.com/karpathy/nanoGPT).
 
 ### How to Run:
 Download the GPT-2 weights from OpenAI, load them in PyTorch, and generate some test data by forwarding 
@@ -27,6 +27,7 @@ TODOs:
 * ✅ Implement sampling from the model.
 * Implement token encoding / decoding.
 * ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
+* ✅ Parallelize Linear and CausalSelfAttention operations.
 
 Wishlist:
 * Replace `arrays` with `Vectors`.
