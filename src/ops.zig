@@ -31,26 +31,26 @@ pub const Linear = struct {
         };
     }
 
-    pub fn _kernel(
+    fn _kernel(
         self: Self,
-        batch_idx: usize,
+        b: usize,
+        wait_group: *std.Thread.WaitGroup,
         inputs: []const f32,
         outputs: []f32,
-        wait_group: *std.Thread.WaitGroup,
     ) void {
         for (0..self.out_features) |o| {
             var sum: f64 = 0.0;
             for (0..self.in_features) |i| {
-                const x: f64 = inputs[batch_idx * self.in_features + i];
+                const x: f64 = inputs[b * self.in_features + i];
                 const w: f64 = self.weight[o * self.in_features + i];
                 sum += x * w;
             }
             if (self.use_bias) {
                 sum += self.bias[o];
             }
-            outputs[batch_idx * self.out_features + o] = @floatCast(f32, sum);
+            outputs[b * self.out_features + o] = @floatCast(f32, sum);
         }
-        wait_group.*.finish();
+        wait_group.finish();
     }
 
     pub fn forward(self: Self, inputs: []const f32, outputs: []f32, pool: ?*std.Thread.Pool) !void {
@@ -59,13 +59,13 @@ pub const Linear = struct {
         for (0..batch_size) |b| {
             wait_group.start();
             if (pool) |p| {
-                try p.*.spawn(Self._kernel, .{ self, b, inputs, outputs, &wait_group });
+                try p.spawn(Self._kernel, .{ self, b, &wait_group, inputs, outputs });
             } else {
-                self._kernel(b, inputs, outputs, &wait_group);
+                self._kernel(b, &wait_group, inputs, outputs);
             }
         }
         if (pool) |p| {
-            p.*.waitAndWork(&wait_group);
+            p.waitAndWork(&wait_group);
         }
     }
 };
@@ -171,7 +171,17 @@ pub const CausalSelfAttention = struct {
         self.transpose(seq_len, outputs, _k);
         self.split_qkv(seq_len, _qkv, 2, outputs);
         self.transpose(seq_len, outputs, _v);
-        scaled_dot_product_attention(_q, _k, _v, self.n_heads, seq_len, self.head_dim, outputs, _attn);
+        try scaled_dot_product_attention(
+            _q,
+            _k,
+            _v,
+            self.n_heads,
+            seq_len,
+            self.head_dim,
+            outputs,
+            pool,
+            _attn,
+        );
         // Hack: Store untranspose requst in q so we don't need to keep another buffer.
         self.untranspose(seq_len, outputs, _q);
         try self.c_proj.forward(_q, outputs, pool);
@@ -271,6 +281,55 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
     }
 }
 
+fn _sdpa_kernel(
+    b: usize,
+    h: usize,
+    wait_group: *std.Thread.WaitGroup,
+    q: []const f32,
+    k: []const f32,
+    v: []const f32,
+    n_heads: usize,
+    seq_len: usize,
+    head_dim: usize,
+    outputs: []f32,
+    _attn: []f32,
+) void {
+    const in_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
+    const out_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
+    // Compute attention weights, i.e. attn = softmax(q @ k.T / head_dim).
+    for (0..seq_len) |r| {
+        for (0..seq_len) |c| {
+            // For masked elements, short-circut the matmul and directly apply
+            // the mask.
+            if (c > r) {
+                _attn[out_offset + r * seq_len + c] = -std.math.inf(f32);
+                continue;
+            }
+
+            // Otherwise compute (q @ k.T) / sqrt(head_dim).
+            var sum: f64 = 0.0;
+            for (0..head_dim) |i| {
+                sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
+            }
+            const value = sum / @sqrt(@intToFloat(f64, head_dim));
+            _attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
+        }
+        const offset = out_offset + r * seq_len;
+        softmax(seq_len, _attn[offset .. offset + seq_len]);
+
+        // Compute attn @ v.
+        for (0..head_dim) |c| {
+            var sum: f64 = 0.0;
+            for (0..seq_len) |i| {
+                // TODO(eugenhotaj): Not cache friendly.
+                sum += _attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
+            }
+            outputs[in_offset + r * head_dim + c] = @floatCast(f32, sum);
+        }
+    }
+    wait_group.finish();
+}
+
 // TODO(eugenhotaj): Expose whether to apply causal attention masking as an argument.
 /// Computes the causal self attention of the given q, k, v tensors.
 pub fn scaled_dot_product_attention(
@@ -281,46 +340,47 @@ pub fn scaled_dot_product_attention(
     seq_len: usize,
     head_dim: usize,
     outputs: []f32,
+    pool: ?*std.Thread.Pool,
     _attn: []f32, // Intermediate buffers used inside the function.
-) void {
+) !void {
     const batch_size = k.len / (n_heads * seq_len * head_dim);
+    var wait_group: std.Thread.WaitGroup = .{};
     for (0..batch_size) |b| {
         for (0..n_heads) |h| {
-            const in_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
-            const out_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
-
-            for (0..seq_len) |r| {
-                // Compute attention weights, i.e. attn = softmax(q @ k.T / head_dim).
-                for (0..seq_len) |c| {
-                    // For masked elements, short-circut the matmul and directly apply
-                    // the mask.
-                    if (c > r) {
-                        _attn[out_offset + r * seq_len + c] = -std.math.inf(f32);
-                        continue;
-                    }
-
-                    // Otherwise compute (q @ k.T) / sqrt(head_dim).
-                    var sum: f64 = 0.0;
-                    for (0..head_dim) |i| {
-                        sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
-                    }
-                    const value = sum / @sqrt(@intToFloat(f64, head_dim));
-                    _attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
-                }
-                const offset = out_offset + r * seq_len;
-                softmax(seq_len, _attn[offset .. offset + seq_len]);
-
-                // Compute attn @ v.
-                for (0..head_dim) |c| {
-                    var sum: f64 = 0.0;
-                    for (0..seq_len) |i| {
-                        // TODO(eugenhotaj): Not cache friendly.
-                        sum += _attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
-                    }
-                    outputs[in_offset + r * head_dim + c] = @floatCast(f32, sum);
-                }
+            wait_group.start();
+            if (pool) |p| {
+                try p.spawn(_sdpa_kernel, .{
+                    b,
+                    h,
+                    &wait_group,
+                    q,
+                    k,
+                    v,
+                    n_heads,
+                    seq_len,
+                    head_dim,
+                    outputs,
+                    _attn,
+                });
+            } else {
+                _sdpa_kernel(
+                    b,
+                    h,
+                    &wait_group,
+                    q,
+                    k,
+                    v,
+                    n_heads,
+                    seq_len,
+                    head_dim,
+                    outputs,
+                    _attn,
+                );
             }
         }
+    }
+    if (pool) |p| {
+        p.waitAndWork(&wait_group);
     }
 }
 

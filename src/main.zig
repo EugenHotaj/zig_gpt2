@@ -325,7 +325,7 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
-    const max_tokens = 10;
+    const max_tokens = 40;
     const temp = 0.8;
 
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
@@ -347,7 +347,7 @@ pub fn main() !void {
         allocator,
     );
     var pool: std.Thread.Pool = undefined;
-    try std.Thread.Pool.init(&pool, .{ .allocator = allocator, .n_jobs = 32 });
+    try std.Thread.Pool.init(&pool, .{ .allocator = allocator });
     var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator, &pool);
 
     // Ensure that forwarding the model produces the same outputs as PyTorch.

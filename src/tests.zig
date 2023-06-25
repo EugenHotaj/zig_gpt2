@@ -403,7 +403,7 @@ test "scaled_dot_product_attention" {
     defer allocator.free(actual);
     const _attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
     defer allocator.free(_attn);
-    ops.scaled_dot_product_attention(
+    try ops.scaled_dot_product_attention(
         q,
         k,
         v,
@@ -411,6 +411,7 @@ test "scaled_dot_product_attention" {
         seq_len,
         head_dim,
         actual,
+        null,
         _attn,
     );
 

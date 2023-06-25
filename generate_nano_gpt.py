@@ -219,7 +219,7 @@ encoded = encoder.encode(
 inputs = torch.tensor(encoded).view((1, -1))
 outputs = gpt(inputs)
 
-generated = gpt.generate(inputs, 10).tolist()[0]
+generated = gpt.generate(inputs, 100).tolist()[0]
 print(encoder.decode(generated))
 
 # fmt: off
