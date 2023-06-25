@@ -22,7 +22,7 @@ const GPTConfig = struct {
     }
 };
 
-pub const OutputBuffers = struct {
+pub const State = struct {
     const Self = @This();
 
     pos: []usize,
@@ -38,8 +38,9 @@ pub const OutputBuffers = struct {
     _attn: []f32,
 
     allocator: std.mem.Allocator,
+    pool: ?*std.Thread.Pool,
 
-    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator) !Self {
+    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator, pool: ?*std.Thread.Pool) !Self {
         var pos = try allocator.alloc(usize, seq_len);
         for (0..seq_len) |i| {
             pos[i] = i;
@@ -55,6 +56,7 @@ pub const OutputBuffers = struct {
             ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
             ._attn = try allocator.alloc(f32, batch_size * config.n_heads * seq_len * seq_len),
             .allocator = allocator,
+            .pool = pool,
         };
     }
 };
@@ -69,11 +71,11 @@ const MLP = struct {
         return MLP{ .c_fc = c_fc, .c_proj = c_proj };
     }
 
-    /// Computes the forward pass and writes the result to outputs.o.
-    pub fn forward(self: Self, inputs: []const f32, outputs: OutputBuffers) void {
-        self.c_fc.forward(inputs, outputs._4xh);
-        ops.gelu(outputs._4xh);
-        self.c_proj.forward(outputs._4xh, outputs.o);
+    /// Computes the forward pass and writes the result to state.o.
+    pub fn forward(self: Self, inputs: []const f32, state: State) !void {
+        try self.c_fc.forward(inputs, state._4xh, state.pool);
+        ops.gelu(state._4xh);
+        try self.c_proj.forward(state._4xh, state.o, state.pool);
     }
 };
 
@@ -89,34 +91,35 @@ const Block = struct {
         return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
     }
 
-    /// Computes the forward pass and writes the result to both outputs.x and outputs.o. This
+    /// Computes the forward pass and writes the result to both state.x and state.o. This
     /// enables sequentially calling multiple Block.forwards() in a row without having to copy
     /// memory.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, outputs: OutputBuffers) void {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, state: State) !void {
         // Create a copy of x for residual computation.
-        std.mem.copyForwards(f32, outputs._h, inputs);
+        std.mem.copyForwards(f32, state._h, inputs);
 
-        self.ln_1.forward(outputs._h);
-        self.attn.forward(
+        self.ln_1.forward(state._h);
+        try self.attn.forward(
             seq_len,
-            outputs._h,
-            outputs.o,
-            outputs._3xh,
+            state._h,
+            state.o,
+            state.pool,
+            state._3xh,
             // Using _4xh as temporary buffer since _q, _k, _v are thrown away.
-            outputs._4xh[0..inputs.len],
-            outputs._4xh[inputs.len .. 2 * inputs.len],
-            outputs._4xh[2 * inputs.len .. 3 * inputs.len],
-            outputs._attn,
+            state._4xh[0..inputs.len],
+            state._4xh[inputs.len .. 2 * inputs.len],
+            state._4xh[2 * inputs.len .. 3 * inputs.len],
+            state._attn,
         );
-        for (0..outputs.o) |i| {
-            outputs._h[i] = outputs.o[i] + inputs[i];
-            outputs.x[i] = outputs._h[i];
+        for (0..state.o) |i| {
+            state._h[i] = state.o[i] + inputs[i];
+            state.x[i] = state._h[i];
         }
-        self.ln_2.forward(outputs._h);
-        self.mlp.forward(outputs._h, outputs);
-        for (0..outputs.o) |i| {
-            outputs.o[i] += outputs.x[i];
-            outputs.x[i] = outputs.o[i];
+        self.ln_2.forward(state._h);
+        try self.mlp.forward(state._h, state);
+        for (0..state.o) |i| {
+            state.o[i] += state.x[i];
+            state.x[i] = state.o[i];
         }
     }
 };
@@ -131,7 +134,14 @@ const GPT = struct {
     ln_f: ops.LayerNorm,
     lm_head: ops.Linear,
 
-    pub fn init(config: GPTConfig, wte: ops.Embedding, wpe: ops.Embedding, h: []const Block, ln_f: ops.LayerNorm, lm_head: ops.Linear) Self {
+    pub fn init(
+        config: GPTConfig,
+        wte: ops.Embedding,
+        wpe: ops.Embedding,
+        h: []const Block,
+        ln_f: ops.LayerNorm,
+        lm_head: ops.Linear,
+    ) Self {
         return Self{
             .config = config,
             .wte = wte,
@@ -142,36 +152,37 @@ const GPT = struct {
         };
     }
 
-    /// Computes the forward pass and writes the result in outputs.logits.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, outputs: OutputBuffers) void {
+    /// Computes the forward pass and writes the result in state.logits.
+    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, state: State) !void {
         const batch_size = inputs.len / seq_len;
 
         // Compute embeddings (token + positional).
-        self.wpe.forward(outputs.pos, outputs.pos_emb);
-        self.wte.forward(inputs, outputs.x);
+        self.wpe.forward(state.pos, state.pos_emb);
+        self.wte.forward(inputs, state.x);
         for (0..batch_size) |b| {
             for (0..seq_len) |s| {
                 for (0..self.config.n_embed) |i| {
                     const batch_offset = (b * seq_len * self.config.n_embed);
                     const seq_offset = (s * self.config.n_embed);
-                    outputs.x[batch_offset + seq_offset + i] += outputs.pos_emb[seq_offset + i];
+                    state.x[batch_offset + seq_offset + i] += state.pos_emb[seq_offset + i];
                 }
             }
         }
 
         // Forward the transformer.
         for (0..self.h.len) |i| {
-            self.h[i].forward(seq_len, outputs.x, outputs);
+            try self.h[i].forward(seq_len, state.x, state);
         }
-        self.ln_f.forward(outputs.x);
+        self.ln_f.forward(state.x);
 
         // Compute logits.
         // Mini-optimization: Only forward the lm_head on the very last position.
         for (0..batch_size) |b| {
             const in_offset = b * seq_len * self.config.n_embed;
-            self.lm_head.forward(
-                outputs.x[in_offset + (seq_len - 1) * self.config.n_embed .. in_offset + seq_len * self.config.n_embed],
-                outputs.logits[b * self.config.vocab_size .. (b + 1) * self.config.vocab_size],
+            try self.lm_head.forward(
+                state.x[in_offset + (seq_len - 1) * self.config.n_embed .. in_offset + seq_len * self.config.n_embed],
+                state.logits[b * self.config.vocab_size .. (b + 1) * self.config.vocab_size],
+                state.pool,
             );
         }
     }
@@ -182,7 +193,7 @@ const GPT = struct {
         max_tokens: usize,
         temp: f32,
         inputs: []usize,
-        outputs: OutputBuffers,
+        state: State,
     ) !void {
         const total_tokens = input_tokens + max_tokens;
         if (total_tokens > self.config.context_size) {
@@ -195,15 +206,15 @@ const GPT = struct {
 
         const logits_dim = self.config.vocab_size;
         for (input_tokens..total_tokens) |s| {
-            self.forward(s, inputs[0..s], outputs);
-            for (0..outputs.logits.len) |i| {
-                outputs.logits[i] /= temp;
+            try self.forward(s, inputs[0..s], state);
+            for (0..state.logits.len) |i| {
+                state.logits[i] /= temp;
             }
-            ops.softmax(logits_dim, outputs.logits);
+            ops.softmax(logits_dim, state.logits);
 
             var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
             var random = rng.random();
-            inputs[s] = random.weightedIndex(f32, outputs.logits);
+            inputs[s] = random.weightedIndex(f32, state.logits);
         }
     }
 };
@@ -335,14 +346,16 @@ pub fn main() !void {
         f32,
         allocator,
     );
-    var outputs = try OutputBuffers.init(batch_size, input_tokens + max_tokens, config, allocator);
+    var pool: std.Thread.Pool = undefined;
+    try std.Thread.Pool.init(&pool, .{ .allocator = allocator, .n_jobs = 32 });
+    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator, &pool);
 
     // Ensure that forwarding the model produces the same outputs as PyTorch.
     const gpt = try load_gpt(config, allocator);
-    gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], outputs);
-    try expectTensorsApproxEqual(expected, outputs.logits);
+    try gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], state);
+    try expectTensorsApproxEqual(expected, state.logits);
 
     // Generate.
-    try gpt.generate(input_tokens, max_tokens, temp, inputs, outputs);
+    try gpt.generate(input_tokens, max_tokens, temp, inputs, state);
     std.debug.print("{any}\n", .{inputs});
 }

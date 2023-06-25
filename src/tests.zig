@@ -58,7 +58,7 @@ test "Linear" {
     const linear = ops.Linear.init(in_features, out_features, weight, bias);
     const actual = try allocator.alloc(f32, batch_size * out_features);
     defer allocator.free(actual);
-    linear.forward(inputs, actual);
+    try linear.forward(inputs, actual, null);
     try expectTensorsApproxEqual(expected, actual);
 
     // Test Linear no bias.
@@ -73,7 +73,7 @@ test "Linear" {
     const no_bias = ops.Linear.init_no_bias(in_features, out_features, weight);
     const actual_no_bias = try allocator.alloc(f32, batch_size * out_features);
     defer allocator.free(actual_no_bias);
-    no_bias.forward(inputs, actual_no_bias);
+    try no_bias.forward(inputs, actual_no_bias, null);
     try expectTensorsApproxEqual(expected_no_bias, actual_no_bias);
 }
 
@@ -305,7 +305,7 @@ test "CausalSelfAttention.forward" {
     const _attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
     defer allocator.free(_attn);
 
-    attn.forward(seq_len, inputs, actual, _qkv, _q, _k, _v, _attn);
+    try attn.forward(seq_len, inputs, actual, null, _qkv, _q, _k, _v, _attn);
 
     try expectTensorsApproxEqual(expected, actual);
 }

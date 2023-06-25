@@ -31,7 +31,13 @@ pub const Linear = struct {
         };
     }
 
-    pub fn _kernel(self: Self, batch_idx: usize, inputs: []const f32, outputs: []f32) void {
+    pub fn _kernel(
+        self: Self,
+        batch_idx: usize,
+        inputs: []const f32,
+        outputs: []f32,
+        wait_group: *std.Thread.WaitGroup,
+    ) void {
         for (0..self.out_features) |o| {
             var sum: f64 = 0.0;
             for (0..self.in_features) |i| {
@@ -44,26 +50,22 @@ pub const Linear = struct {
             }
             outputs[batch_idx * self.out_features + o] = @floatCast(f32, sum);
         }
+        wait_group.*.finish();
     }
 
-    pub fn forward(self: Self, inputs: []const f32, outputs: []f32) void {
-        const n_threads: usize = 256;
-        var threads: [n_threads]std.Thread = undefined;
-
+    pub fn forward(self: Self, inputs: []const f32, outputs: []f32, pool: ?*std.Thread.Pool) !void {
         const batch_size = inputs.len / self.in_features;
-        const n_chunks = batch_size / n_threads + 1;
-        for (0..n_chunks) |c| {
-            const iter = std.math.min(n_threads, batch_size - c * n_threads);
-            for (0..iter) |t| {
-                threads[t] = std.Thread.spawn(
-                    .{},
-                    Self._kernel,
-                    .{ self, c * n_threads + t, inputs, outputs },
-                ) catch undefined;
+        var wait_group: std.Thread.WaitGroup = .{};
+        for (0..batch_size) |b| {
+            wait_group.start();
+            if (pool) |p| {
+                try p.*.spawn(Self._kernel, .{ self, b, inputs, outputs, &wait_group });
+            } else {
+                self._kernel(b, inputs, outputs, &wait_group);
             }
-            for (0..iter) |t| {
-                threads[t].join();
-            }
+        }
+        if (pool) |p| {
+            p.*.waitAndWork(&wait_group);
         }
     }
 };
@@ -154,14 +156,15 @@ pub const CausalSelfAttention = struct {
         seq_len: usize,
         inputs: []const f32,
         outputs: []f32,
+        pool: ?*std.Thread.Pool,
         // Parameters below are intermediate buffers used inside the function.
         _qkv: []f32,
         _q: []f32,
         _k: []f32,
         _v: []f32,
         _attn: []f32,
-    ) void {
-        self.c_attn.forward(inputs, _qkv);
+    ) !void {
+        try self.c_attn.forward(inputs, _qkv, pool);
         self.split_qkv(seq_len, _qkv, 0, outputs);
         self.transpose(seq_len, outputs, _q);
         self.split_qkv(seq_len, _qkv, 1, outputs);
@@ -171,7 +174,7 @@ pub const CausalSelfAttention = struct {
         scaled_dot_product_attention(_q, _k, _v, self.n_heads, seq_len, self.head_dim, outputs, _attn);
         // Hack: Store untranspose requst in q so we don't need to keep another buffer.
         self.untranspose(seq_len, outputs, _q);
-        self.c_proj.forward(_q, outputs);
+        try self.c_proj.forward(_q, outputs, pool);
     }
 
     // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
