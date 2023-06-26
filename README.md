@@ -1,4 +1,4 @@
-# zig_inference
+# zig_gpt2
 GPT2 inference engine written in Zig. The inference engine can run [NanoGPT](https://github.com/karpathy/nanoGPT).
 
 ### How to Run:
