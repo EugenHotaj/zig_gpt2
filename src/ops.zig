@@ -1,5 +1,5 @@
 const std = @import("std");
-const blas = @cImport(@cInclude("/Users/eugenhotaj/Desktop/OpenBLAS/cblas.h"));
+const blas = @cImport(@cInclude("cblas.h"));
 
 pub const Linear = struct {
     const Self = @This();

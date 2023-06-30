@@ -1,6 +1,7 @@
 zig-cache/
 zig-out/
 models/
+lib/OpenBLAS
 .venv/
 .DS_Store
 main*
