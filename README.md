@@ -2,6 +2,11 @@
 GPT2 inference engine written in Zig. The inference engine can run [NanoGPT](https://github.com/karpathy/nanoGPT).
 
 ### How to Run:
+
+*NOTE:* `zig_gpt2` uses OpenBLAS under the hood for fast matrix multiplications. To run, you first need to build OpenBLAS and
+place it in `lib/OpenBLAS`. This should be as easy as cloning the [OpenBLAS GitHub repo](https://github.com/xianyi/OpenBLAS)
+and running `make`.
+
 Download the GPT-2 weights from OpenAI, load them in PyTorch, and generate some test data by forwarding 
 a few examples:
 ```bash
@@ -11,8 +16,7 @@ time python3 generate_nano_gpt.py
 
 Build the zig binary and run it on the generated data:
 ```bash
-zig build-exe ./src/main.zig -O ReleaseFast -fstrip -fsingle-threaded -target x86_64-macos
-time ./main
+zig build run -DOptimize=ReleaseFast
 ```
 The zig binary loads the GPT-2 weights, forwards the same examples, and checks that the output matches PyTorch's. It also
 generates a bunch of tokens.
@@ -29,5 +33,5 @@ TODOs:
 * ✅ Parallelize Linear and CausalSelfAttention operations.
 
 Wishlist:
+* ✅ Replace custom linear algebra kernels with BLAS.
 * Replace `arrays` with `Vectors`.
-* Replace custom linear algebra kernels with BLAS.
