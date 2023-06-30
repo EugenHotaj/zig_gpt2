@@ -33,8 +33,8 @@ class GPTConfig:
 def new_gelu(x):
     """Gaussian Error Linear Unit (GELU) activation function.
 
-    Copied from the nanogpt repo and identical to OpenAI GPT2 implementation. Paper:
-    https://arxiv.org/abs/1606.08415
+    Copied from NanoGPT and identical to OpenAI GPT-2 implementation.
+    Paper: https://arxiv.org/abs/1606.08415
     """
     # fmt: off
     return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
@@ -62,7 +62,7 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         # Key, query, value projections for all heads, but in a batch.
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        # Output projection
+        # Output projection.
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
         # Causal mask.
         bias = torch.tril(torch.ones(config.block_size, config.block_size))
@@ -219,14 +219,14 @@ encoded = encoder.encode(
 inputs = torch.tensor(encoded).view((1, -1))
 outputs = gpt(inputs)
 
-generated = gpt.generate(inputs, 100).tolist()[0]
+generated = gpt.generate(inputs, 10).tolist()[0]
 print(encoder.decode(generated))
 
 # fmt: off
 # Zig outputs:
 print(
     encoder.decode(
-        [ 35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 1, 1639, 423, 587, 2642, 13, 770, 6764, 286 ]
+        [35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 24426, 32826, 20711, 48628, 2241, 484, 22485, 683, 625]
     )
 )
 # fmt: on

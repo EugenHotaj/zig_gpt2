@@ -1,4 +1,5 @@
 const std = @import("std");
+const blas = @cImport(@cInclude("/Users/eugenhotaj/Desktop/OpenBLAS/cblas.h"));
 
 pub const Linear = struct {
     const Self = @This();
@@ -31,42 +32,31 @@ pub const Linear = struct {
         };
     }
 
-    fn _kernel(
-        self: Self,
-        b: usize,
-        wait_group: *std.Thread.WaitGroup,
-        inputs: []const f32,
-        outputs: []f32,
-    ) void {
-        for (0..self.out_features) |o| {
-            var sum: f64 = 0.0;
-            for (0..self.in_features) |i| {
-                const x: f64 = inputs[b * self.in_features + i];
-                const w: f64 = self.weight[o * self.in_features + i];
-                sum += x * w;
-            }
-            if (self.use_bias) {
-                sum += self.bias[o];
-            }
-            outputs[b * self.out_features + o] = @floatCast(f32, sum);
-        }
-        wait_group.finish();
-    }
-
-    pub fn forward(self: Self, inputs: []const f32, outputs: []f32, pool: ?*std.Thread.Pool) !void {
+    pub fn forward(self: Self, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / self.in_features;
-        var wait_group: std.Thread.WaitGroup = .{};
-        for (0..batch_size) |b| {
-            wait_group.start();
-            if (pool) |p| {
-                try p.spawn(Self._kernel, .{ self, b, &wait_group, inputs, outputs });
-            } else {
-                self._kernel(b, &wait_group, inputs, outputs);
+        var beta: f32 = 0.0;
+        if (self.use_bias) {
+            for (0..batch_size) |b| {
+                @memcpy(outputs[b * self.out_features .. (b + 1) * self.out_features], self.bias);
             }
+            beta = 1.0;
         }
-        if (pool) |p| {
-            p.waitAndWork(&wait_group);
-        }
+        blas.cblas_sgemm(
+            blas.CblasRowMajor,
+            blas.CblasNoTrans,
+            blas.CblasTrans,
+            @intCast(i32, batch_size),
+            @intCast(i32, self.out_features),
+            @intCast(i32, self.in_features),
+            1.0,
+            inputs.ptr,
+            @intCast(i32, self.in_features),
+            self.weight.ptr,
+            @intCast(i32, self.in_features),
+            beta,
+            outputs.ptr,
+            @intCast(i32, self.out_features),
+        );
     }
 };
 
@@ -164,7 +154,7 @@ pub const CausalSelfAttention = struct {
         _v: []f32,
         _attn: []f32,
     ) !void {
-        try self.c_attn.forward(inputs, _qkv, pool);
+        self.c_attn.forward(inputs, _qkv);
         self.split_qkv(seq_len, _qkv, 0, outputs);
         self.transpose(seq_len, outputs, _q);
         self.split_qkv(seq_len, _qkv, 1, outputs);
@@ -184,7 +174,7 @@ pub const CausalSelfAttention = struct {
         );
         // Hack: Store untranspose requst in q so we don't need to keep another buffer.
         self.untranspose(seq_len, outputs, _q);
-        try self.c_proj.forward(_q, outputs, pool);
+        self.c_proj.forward(_q, outputs);
     }
 
     // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index

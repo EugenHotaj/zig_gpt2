@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
+    const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
         .name = "zig_inference",
@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
+    exe.addObjectFile("/Users/eugenhotaj/Desktop/OpenBLAS/libopenblas.a");
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
@@ -59,6 +59,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    unit_tests.addObjectFile("/Users/eugenhotaj/Desktop/OpenBLAS/libopenblas.a");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 

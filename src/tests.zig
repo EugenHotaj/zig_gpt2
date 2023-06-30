@@ -7,13 +7,13 @@ pub fn expectTensorsApproxEqual(expected: []const f32, actual: []const f32) !voi
             try std.testing.expectApproxEqAbs(
                 expected[i],
                 actual[i],
-                2e-7,
+                5e-7,
             );
         } else {
             try std.testing.expectApproxEqRel(
                 expected[i],
                 actual[i],
-                @sqrt(std.math.floatEps(f32)),
+                6e-4,
             );
         }
     }
@@ -58,7 +58,7 @@ test "Linear" {
     const linear = ops.Linear.init(in_features, out_features, weight, bias);
     const actual = try allocator.alloc(f32, batch_size * out_features);
     defer allocator.free(actual);
-    try linear.forward(inputs, actual, null);
+    linear.forward(inputs, actual);
     try expectTensorsApproxEqual(expected, actual);
 
     // Test Linear no bias.
@@ -73,7 +73,7 @@ test "Linear" {
     const no_bias = ops.Linear.init_no_bias(in_features, out_features, weight);
     const actual_no_bias = try allocator.alloc(f32, batch_size * out_features);
     defer allocator.free(actual_no_bias);
-    try no_bias.forward(inputs, actual_no_bias, null);
+    no_bias.forward(inputs, actual_no_bias);
     try expectTensorsApproxEqual(expected_no_bias, actual_no_bias);
 }
 

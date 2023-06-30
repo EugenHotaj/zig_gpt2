@@ -37,13 +37,13 @@ if not os.path.exists(model):
             with tqdm(
                 ncols=100, desc=f"Fetching {filename}", total=file_size, unit_scale=True
             ) as pbar:
-                # 1k for chunk_size, since Ethernet packet size is around 1500 bytes
+                # 1k for chunk_size, since Ethernet packet size is around 1500 bytes.
                 for chunk in resp.iter_content(chunk_size=chunk_size):
                     file_.write(chunk)
                     pbar.update(chunk_size)
 
 
-# Dump the model weights in plain text if they don't already exist.
+# Dump the model weights in plain binary if they don't already exist.
 weights_dir = f"{model}/raw"
 if not os.path.exists(weights_dir):
     os.makedirs(weights_dir)

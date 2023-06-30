@@ -73,9 +73,9 @@ const MLP = struct {
 
     /// Computes the forward pass and writes the result to state.o.
     pub fn forward(self: Self, inputs: []const f32, state: State) !void {
-        try self.c_fc.forward(inputs, state._4xh, state.pool);
+        self.c_fc.forward(inputs, state._4xh);
         ops.gelu(state._4xh);
-        try self.c_proj.forward(state._4xh, state.o, state.pool);
+        self.c_proj.forward(state._4xh, state.o);
     }
 };
 
@@ -179,10 +179,9 @@ const GPT = struct {
         // Mini-optimization: Only forward the lm_head on the very last position.
         for (0..batch_size) |b| {
             const in_offset = b * seq_len * self.config.n_embed;
-            try self.lm_head.forward(
+            self.lm_head.forward(
                 state.x[in_offset + (seq_len - 1) * self.config.n_embed .. in_offset + seq_len * self.config.n_embed],
                 state.logits[b * self.config.vocab_size .. (b + 1) * self.config.vocab_size],
-                state.pool,
             );
         }
     }
@@ -325,7 +324,7 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
-    const max_tokens = 40;
+    const max_tokens = 10;
     const temp = 0.8;
 
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
@@ -348,7 +347,7 @@ pub fn main() !void {
     );
     var pool: std.Thread.Pool = undefined;
     try std.Thread.Pool.init(&pool, .{ .allocator = allocator });
-    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator, &pool);
+    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator, null);
 
     // Ensure that forwarding the model produces the same outputs as PyTorch.
     const gpt = try load_gpt(config, allocator);
