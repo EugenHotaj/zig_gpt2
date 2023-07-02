@@ -305,7 +305,7 @@ test "CausalSelfAttention.forward" {
     const _attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
     defer allocator.free(_attn);
 
-    try attn.forward(seq_len, inputs, actual, null, _qkv, _q, _k, _v, _attn);
+    attn.forward(seq_len, inputs, actual, _qkv, _q, _k, _v, _attn);
 
     try expectTensorsApproxEqual(expected, actual);
 }
@@ -403,7 +403,7 @@ test "scaled_dot_product_attention" {
     defer allocator.free(actual);
     const _attn = try allocator.alloc(f32, batch_size * n_heads * seq_len * seq_len);
     defer allocator.free(_attn);
-    try ops.scaled_dot_product_attention(
+    ops.scaled_dot_product_attention(
         q,
         k,
         v,
@@ -411,7 +411,6 @@ test "scaled_dot_product_attention" {
         seq_len,
         head_dim,
         actual,
-        null,
         _attn,
     );
 

@@ -146,14 +146,13 @@ pub const CausalSelfAttention = struct {
         seq_len: usize,
         inputs: []const f32,
         outputs: []f32,
-        pool: ?*std.Thread.Pool,
         // Parameters below are intermediate buffers used inside the function.
         _qkv: []f32,
         _q: []f32,
         _k: []f32,
         _v: []f32,
         _attn: []f32,
-    ) !void {
+    ) void {
         self.c_attn.forward(inputs, _qkv);
         self.split_qkv(seq_len, _qkv, 0, outputs);
         self.transpose(seq_len, outputs, _q);
@@ -161,7 +160,7 @@ pub const CausalSelfAttention = struct {
         self.transpose(seq_len, outputs, _k);
         self.split_qkv(seq_len, _qkv, 2, outputs);
         self.transpose(seq_len, outputs, _v);
-        try scaled_dot_product_attention(
+        scaled_dot_product_attention(
             _q,
             _k,
             _v,
@@ -169,7 +168,6 @@ pub const CausalSelfAttention = struct {
             seq_len,
             self.head_dim,
             outputs,
-            pool,
             _attn,
         );
         // Hack: Store untranspose requst in q so we don't need to keep another buffer.
@@ -271,55 +269,6 @@ pub fn softmax(n_features: usize, inputs: []f32) void {
     }
 }
 
-fn _sdpa_kernel(
-    b: usize,
-    h: usize,
-    wait_group: *std.Thread.WaitGroup,
-    q: []const f32,
-    k: []const f32,
-    v: []const f32,
-    n_heads: usize,
-    seq_len: usize,
-    head_dim: usize,
-    outputs: []f32,
-    _attn: []f32,
-) void {
-    const in_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
-    const out_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
-    // Compute attention weights, i.e. attn = softmax(q @ k.T / head_dim).
-    for (0..seq_len) |r| {
-        for (0..seq_len) |c| {
-            // For masked elements, short-circut the matmul and directly apply
-            // the mask.
-            if (c > r) {
-                _attn[out_offset + r * seq_len + c] = -std.math.inf(f32);
-                continue;
-            }
-
-            // Otherwise compute (q @ k.T) / sqrt(head_dim).
-            var sum: f64 = 0.0;
-            for (0..head_dim) |i| {
-                sum += q[in_offset + r * head_dim + i] * k[in_offset + c * head_dim + i];
-            }
-            const value = sum / @sqrt(@intToFloat(f64, head_dim));
-            _attn[out_offset + r * seq_len + c] = @floatCast(f32, value);
-        }
-        const offset = out_offset + r * seq_len;
-        softmax(seq_len, _attn[offset .. offset + seq_len]);
-
-        // Compute attn @ v.
-        for (0..head_dim) |c| {
-            var sum: f64 = 0.0;
-            for (0..seq_len) |i| {
-                // TODO(eugenhotaj): Not cache friendly.
-                sum += _attn[out_offset + r * seq_len + i] * v[in_offset + i * head_dim + c];
-            }
-            outputs[in_offset + r * head_dim + c] = @floatCast(f32, sum);
-        }
-    }
-    wait_group.finish();
-}
-
 // TODO(eugenhotaj): Expose whether to apply causal attention masking as an argument.
 /// Computes the causal self attention of the given q, k, v tensors.
 pub fn scaled_dot_product_attention(
@@ -330,47 +279,69 @@ pub fn scaled_dot_product_attention(
     seq_len: usize,
     head_dim: usize,
     outputs: []f32,
-    pool: ?*std.Thread.Pool,
     _attn: []f32, // Intermediate buffers used inside the function.
-) !void {
+) void {
     const batch_size = k.len / (n_heads * seq_len * head_dim);
-    var wait_group: std.Thread.WaitGroup = .{};
     for (0..batch_size) |b| {
         for (0..n_heads) |h| {
-            wait_group.start();
-            if (pool) |p| {
-                try p.spawn(_sdpa_kernel, .{
-                    b,
-                    h,
-                    &wait_group,
-                    q,
-                    k,
-                    v,
-                    n_heads,
-                    seq_len,
-                    head_dim,
-                    outputs,
-                    _attn,
-                });
-            } else {
-                _sdpa_kernel(
-                    b,
-                    h,
-                    &wait_group,
-                    q,
-                    k,
-                    v,
-                    n_heads,
-                    seq_len,
-                    head_dim,
-                    outputs,
-                    _attn,
-                );
+            const kqvo_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
+            const attn_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
+
+            // Compute unscaled attention weights, i.e. attn = q @ k.T.
+            var q_slice = q[kqvo_offset .. kqvo_offset + seq_len * head_dim];
+            var k_slice = k[kqvo_offset .. kqvo_offset + seq_len * head_dim];
+            var attn_slice = _attn[attn_offset .. attn_offset + seq_len * seq_len];
+            blas.cblas_sgemm(
+                blas.CblasRowMajor,
+                blas.CblasNoTrans,
+                blas.CblasTrans,
+                @intCast(i32, seq_len),
+                @intCast(i32, seq_len),
+                @intCast(i32, head_dim),
+                1.0,
+                q_slice.ptr,
+                @intCast(i32, head_dim),
+                k_slice.ptr,
+                @intCast(i32, head_dim),
+                0.0,
+                attn_slice.ptr,
+                @intCast(i32, seq_len),
+            );
+
+            // Compute scaled attention weights, i.e. attn = softmax(attn / sqrt(head_dim)).
+            // TODO(eugenhotaj): Can we vectorize this?
+            for (0..seq_len) |r| {
+                for (0..seq_len) |c| {
+                    const idx = r * seq_len + c;
+                    if (c > r) {
+                        attn_slice[idx] = -std.math.inf(f32);
+                    } else {
+                        attn_slice[idx] /= @sqrt(@intToFloat(f32, head_dim));
+                    }
+                }
+                softmax(seq_len, attn_slice[r * seq_len .. (r + 1) * seq_len]);
             }
+
+            // Compute attn @ v.
+            var v_slice = v[kqvo_offset .. kqvo_offset + seq_len * head_dim];
+            var out_slice = outputs[kqvo_offset .. kqvo_offset + seq_len * head_dim];
+            blas.cblas_sgemm(
+                blas.CblasRowMajor,
+                blas.CblasNoTrans,
+                blas.CblasNoTrans,
+                @intCast(i32, seq_len),
+                @intCast(i32, head_dim),
+                @intCast(i32, seq_len),
+                1.0,
+                attn_slice.ptr,
+                @intCast(i32, seq_len),
+                v_slice.ptr,
+                @intCast(i32, head_dim),
+                0.0,
+                out_slice.ptr,
+                @intCast(i32, head_dim),
+            );
         }
-    }
-    if (pool) |p| {
-        p.waitAndWork(&wait_group);
     }
 }
 

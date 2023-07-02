@@ -1,5 +1,10 @@
 # zig_gpt2
-GPT2 inference engine written in Zig. The inference engine can run [NanoGPT](https://github.com/karpathy/nanoGPT).
+GPT-2 inference engine written in Zig. 
+
+### Features:
+* Only third-party dependency is OpenBLAS.
+* No memory allocations at runtime.
+* Can run [NanoGPT](https://github.com/karpathy/nanoGPT). 
 
 ### How to Run:
 
@@ -30,8 +35,8 @@ TODOs:
 * ✅ Implement sampling from the model.
 * Implement token encoding / decoding.
 * ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
-* ✅ Parallelize Linear and CausalSelfAttention operations.
+* ✅ Parallelize Linear and CausalSelfAttention operations. (Replaced with BLAS instead.)
+* Replace custom linear algebra kernels with BLAS.
 
 Wishlist:
-* ✅ Replace custom linear algebra kernels with BLAS.
 * Replace `arrays` with `Vectors`.

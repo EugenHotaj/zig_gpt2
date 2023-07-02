@@ -38,9 +38,8 @@ pub const State = struct {
     _attn: []f32,
 
     allocator: std.mem.Allocator,
-    pool: ?*std.Thread.Pool,
 
-    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator, pool: ?*std.Thread.Pool) !Self {
+    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator) !Self {
         var pos = try allocator.alloc(usize, seq_len);
         for (0..seq_len) |i| {
             pos[i] = i;
@@ -56,7 +55,6 @@ pub const State = struct {
             ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
             ._attn = try allocator.alloc(f32, batch_size * config.n_heads * seq_len * seq_len),
             .allocator = allocator,
-            .pool = pool,
         };
     }
 };
@@ -72,7 +70,7 @@ const MLP = struct {
     }
 
     /// Computes the forward pass and writes the result to state.o.
-    pub fn forward(self: Self, inputs: []const f32, state: State) !void {
+    pub fn forward(self: Self, inputs: []const f32, state: State) void {
         self.c_fc.forward(inputs, state._4xh);
         ops.gelu(state._4xh);
         self.c_proj.forward(state._4xh, state.o);
@@ -94,16 +92,15 @@ const Block = struct {
     /// Computes the forward pass and writes the result to both state.x and state.o. This
     /// enables sequentially calling multiple Block.forwards() in a row without having to copy
     /// memory.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, state: State) !void {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, state: State) void {
         // Create a copy of x for residual computation.
         std.mem.copyForwards(f32, state._h, inputs);
 
         self.ln_1.forward(state._h);
-        try self.attn.forward(
+        self.attn.forward(
             seq_len,
             state._h,
             state.o,
-            state.pool,
             state._3xh,
             // Using _4xh as temporary buffer since _q, _k, _v are thrown away.
             state._4xh[0..inputs.len],
@@ -116,7 +113,7 @@ const Block = struct {
             state.x[i] = state._h[i];
         }
         self.ln_2.forward(state._h);
-        try self.mlp.forward(state._h, state);
+        self.mlp.forward(state._h, state);
         for (0..state.o) |i| {
             state.o[i] += state.x[i];
             state.x[i] = state.o[i];
@@ -153,7 +150,7 @@ const GPT = struct {
     }
 
     /// Computes the forward pass and writes the result in state.logits.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, state: State) !void {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, state: State) void {
         const batch_size = inputs.len / seq_len;
 
         // Compute embeddings (token + positional).
@@ -171,7 +168,7 @@ const GPT = struct {
 
         // Forward the transformer.
         for (0..self.h.len) |i| {
-            try self.h[i].forward(seq_len, state.x, state);
+            self.h[i].forward(seq_len, state.x, state);
         }
         self.ln_f.forward(state.x);
 
@@ -205,7 +202,7 @@ const GPT = struct {
 
         const logits_dim = self.config.vocab_size;
         for (input_tokens..total_tokens) |s| {
-            try self.forward(s, inputs[0..s], state);
+            self.forward(s, inputs[0..s], state);
             for (0..state.logits.len) |i| {
                 state.logits[i] /= temp;
             }
@@ -345,13 +342,11 @@ pub fn main() !void {
         f32,
         allocator,
     );
-    var pool: std.Thread.Pool = undefined;
-    try std.Thread.Pool.init(&pool, .{ .allocator = allocator });
-    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator, null);
+    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator);
 
     // Ensure that forwarding the model produces the same outputs as PyTorch.
     const gpt = try load_gpt(config, allocator);
-    try gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], state);
+    gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], state);
     try expectTensorsApproxEqual(expected, state.logits);
 
     // Generate.

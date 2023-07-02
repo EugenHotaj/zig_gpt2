@@ -61,7 +61,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     unit_tests.addIncludePath("lib/OpenBLAS");
-    exe.addObjectFile("lib/OpenBLAS/libopenblas.a");
+    unit_tests.addObjectFile("lib/OpenBLAS/libopenblas.a");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
