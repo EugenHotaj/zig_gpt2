@@ -1,6 +1,5 @@
 const std = @import("std");
 const ops = @import("ops.zig");
-const blas = @cImport(@cInclude("cblas.h"));
 const expectTensorsApproxEqual = @import("tests.zig").expectTensorsApproxEqual;
 
 const GPTConfig = struct {
@@ -321,7 +320,7 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
-    const max_tokens = 10;
+    const max_tokens = 100;
     const temp = 0.8;
 
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);

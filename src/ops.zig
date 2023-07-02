@@ -73,10 +73,7 @@ pub const Embedding = struct {
     pub fn forward(self: Self, idxs: []const usize, embeddings: []f32) void {
         for (0..idxs.len) |i| {
             const idx = idxs[i];
-            // TODO(eugenhotaj): There is no reason to copy memory here. We should
-            // instead return views (pointers) to the embeddings.
-            std.mem.copyForwards(
-                f32,
+            @memcpy(
                 embeddings[i * self.emb_dim .. (i + 1) * self.emb_dim],
                 self.weight[self.emb_dim * idx .. self.emb_dim * (idx + 1)],
             );
@@ -175,8 +172,8 @@ pub const CausalSelfAttention = struct {
         self.c_proj.forward(_q, outputs);
     }
 
-    // Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
-    // determines which split to return.
+    /// Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
+    /// determines which split to return.
     pub fn split_qkv(
         self: Self,
         seq_len: usize,
@@ -190,8 +187,7 @@ pub const CausalSelfAttention = struct {
             for (0..seq_len) |r| {
                 const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed);
                 const in_offset = (b * seq_len * n_embed_) + (r * n_embed_) + (split_idx * self.n_embed);
-                std.mem.copy(
-                    f32,
+                @memcpy(
                     outputs[out_offset .. out_offset + self.n_embed],
                     inputs[in_offset .. in_offset + self.n_embed],
                 );
@@ -199,7 +195,7 @@ pub const CausalSelfAttention = struct {
         }
     }
 
-    // Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
+    /// Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
     pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / (seq_len * self.n_embed);
         for (0..batch_size) |b| {
@@ -207,8 +203,7 @@ pub const CausalSelfAttention = struct {
                 for (0..seq_len) |r| {
                     const out_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
                     const in_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
-                    std.mem.copy(
-                        f32,
+                    @memcpy(
                         outputs[out_offset .. out_offset + self.head_dim],
                         inputs[in_offset .. in_offset + self.head_dim],
                     );
@@ -217,7 +212,7 @@ pub const CausalSelfAttention = struct {
         }
     }
 
-    // Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
+    /// Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
     pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / (seq_len * self.n_embed);
         for (0..batch_size) |b| {
@@ -225,8 +220,7 @@ pub const CausalSelfAttention = struct {
                 for (0..self.n_heads) |h| {
                     const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
                     const in_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
-                    std.mem.copy(
-                        f32,
+                    @memcpy(
                         outputs[out_offset .. out_offset + self.head_dim],
                         inputs[in_offset .. in_offset + self.head_dim],
                     );
@@ -250,7 +244,6 @@ pub fn gelu(inputs: []f32) void {
 
 /// Computes the (stable) softmax of the given inputs vector inplace.
 pub fn softmax(inputs: []f32) void {
-    // TODO(eugenhotaj): Vectorize these row-wise operations.
     const max = std.mem.max(f32, inputs);
     var sum: f64 = 0.0;
     for (0..inputs.len) |i| {
@@ -302,14 +295,8 @@ pub fn scaled_dot_product_attention(
             );
 
             // Causally mask and compute attention probabilities, i.e. attn = softmax(attn);
-            // TODO(eugenhotaj): Can we vectorize this?
             for (0..seq_len) |r| {
-                for (0..seq_len) |c| {
-                    const idx = r * seq_len + c;
-                    if (c > r) {
-                        attn_slice[idx] = -std.math.inf(f32);
-                    }
-                }
+                @memset(attn_slice[r * seq_len + r + 1 .. (r + 1) * seq_len], -std.math.inf(f32));
                 softmax(attn_slice[r * seq_len .. (r + 1) * seq_len]);
             }
 
