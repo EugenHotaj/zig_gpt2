@@ -356,7 +356,9 @@ test "softmax" {
     );
     defer allocator.free(expected);
 
-    ops.softmax(in_features, inputs);
+    for (0..batch_size) |b| {
+        ops.softmax(inputs[b * in_features .. (b + 1) * in_features]);
+    }
     const actual = inputs;
 
     try expectTensorsApproxEqual(expected, actual);

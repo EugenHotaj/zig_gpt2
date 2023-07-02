@@ -1,5 +1,6 @@
 const std = @import("std");
 const ops = @import("ops.zig");
+const blas = @cImport(@cInclude("cblas.h"));
 const expectTensorsApproxEqual = @import("tests.zig").expectTensorsApproxEqual;
 
 const GPTConfig = struct {
@@ -200,13 +201,12 @@ const GPT = struct {
             return error.BatchSizeTooBig;
         }
 
-        const logits_dim = self.config.vocab_size;
         for (input_tokens..total_tokens) |s| {
             self.forward(s, inputs[0..s], state);
             for (0..state.logits.len) |i| {
                 state.logits[i] /= temp;
             }
-            ops.softmax(logits_dim, state.logits);
+            ops.softmax(state.logits);
 
             var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
             var random = rng.random();

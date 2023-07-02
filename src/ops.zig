@@ -248,24 +248,17 @@ pub fn gelu(inputs: []f32) void {
     }
 }
 
-/// Computes the (stable) softmax of the given inputs tensor inplace. We assume tensor has shape
-/// [batch_size, D] and compute the softmax along D.
-pub fn softmax(n_features: usize, inputs: []f32) void {
-    const batch_size = inputs.len / n_features;
-
+/// Computes the (stable) softmax of the given inputs vector inplace.
+pub fn softmax(inputs: []f32) void {
     // TODO(eugenhotaj): Vectorize these row-wise operations.
-    for (0..batch_size) |b| {
-        const max = std.mem.max(f32, inputs[(b * n_features) .. (b + 1) * n_features]);
-
-        var sum: f64 = 0.0;
-        for (0..n_features) |i| {
-            const idx = b * n_features + i;
-            inputs[idx] = @exp(inputs[idx] - max);
-            sum += inputs[idx];
-        }
-        for (0..n_features) |i| {
-            inputs[b * n_features + i] /= @floatCast(f32, sum);
-        }
+    const max = std.mem.max(f32, inputs);
+    var sum: f64 = 0.0;
+    for (0..inputs.len) |i| {
+        inputs[i] = @exp(inputs[i] - max);
+        sum += inputs[i];
+    }
+    for (0..inputs.len) |i| {
+        inputs[i] /= @floatCast(f32, sum);
     }
 }
 
@@ -287,7 +280,7 @@ pub fn scaled_dot_product_attention(
             const kqvo_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
             const attn_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
 
-            // Compute unscaled attention weights, i.e. attn = q @ k.T.
+            // Compute attention logits, i.e. attn = (q @ k.T) / sqrt(head_dim).
             var q_slice = q[kqvo_offset .. kqvo_offset + seq_len * head_dim];
             var k_slice = k[kqvo_offset .. kqvo_offset + seq_len * head_dim];
             var attn_slice = _attn[attn_offset .. attn_offset + seq_len * seq_len];
@@ -298,7 +291,7 @@ pub fn scaled_dot_product_attention(
                 @intCast(i32, seq_len),
                 @intCast(i32, seq_len),
                 @intCast(i32, head_dim),
-                1.0,
+                1.0 / @sqrt(@intToFloat(f32, head_dim)),
                 q_slice.ptr,
                 @intCast(i32, head_dim),
                 k_slice.ptr,
@@ -308,18 +301,16 @@ pub fn scaled_dot_product_attention(
                 @intCast(i32, seq_len),
             );
 
-            // Compute scaled attention weights, i.e. attn = softmax(attn / sqrt(head_dim)).
+            // Causally mask and compute attention probabilities, i.e. attn = softmax(attn);
             // TODO(eugenhotaj): Can we vectorize this?
             for (0..seq_len) |r| {
                 for (0..seq_len) |c| {
                     const idx = r * seq_len + c;
                     if (c > r) {
                         attn_slice[idx] = -std.math.inf(f32);
-                    } else {
-                        attn_slice[idx] /= @sqrt(@intToFloat(f32, head_dim));
                     }
                 }
-                softmax(seq_len, attn_slice[r * seq_len .. (r + 1) * seq_len]);
+                softmax(attn_slice[r * seq_len .. (r + 1) * seq_len]);
             }
 
             // Compute attn @ v.
