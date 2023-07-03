@@ -313,14 +313,14 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
         h[i] = try load_block(i, config, allocator);
     }
     const ln_f = try load_layer_norm("ln_f", config.n_embed, allocator);
-    const lm_head = ops.Linear.init_no_bias(config.n_embed, config.vocab_size, wte.weight);
+    const lm_head = ops.Linear.init(config.n_embed, config.vocab_size, wte.weight, null);
     return GPT.init(config, wte, wpe, h, ln_f, lm_head);
 }
 
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
-    const max_tokens = 100;
+    const max_tokens = 10;
     const temp = 0.8;
 
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);

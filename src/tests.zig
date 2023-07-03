@@ -70,7 +70,7 @@ test "Linear" {
     );
     defer allocator.free(expected_no_bias);
 
-    const no_bias = ops.Linear.init_no_bias(in_features, out_features, weight);
+    const no_bias = ops.Linear.init(in_features, out_features, weight, null);
     const actual_no_bias = try allocator.alloc(f32, batch_size * out_features);
     defer allocator.free(actual_no_bias);
     no_bias.forward(inputs, actual_no_bias);

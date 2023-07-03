@@ -7,37 +7,23 @@ pub const Linear = struct {
     in_features: usize,
     out_features: usize,
     weight: []const f32, // Weights must be provided in *column major* order!
-    bias: []const f32,
+    bias: ?[]const f32,
 
-    // Fields below are private and should not be set directly.
-    use_bias: bool,
-
-    pub fn init(in_features: usize, out_features: usize, weight: []const f32, bias: []const f32) Self {
+    pub fn init(in_features: usize, out_features: usize, weight: []const f32, bias: ?[]const f32) Self {
         return Self{
             .in_features = in_features,
             .out_features = out_features,
-            .use_bias = true,
             .weight = weight,
             .bias = bias,
-        };
-    }
-
-    pub fn init_no_bias(in_features: usize, out_features: usize, weight: []const f32) Self {
-        return Self{
-            .in_features = in_features,
-            .out_features = out_features,
-            .use_bias = false,
-            .weight = weight,
-            .bias = undefined,
         };
     }
 
     pub fn forward(self: Self, inputs: []const f32, outputs: []f32) void {
         const batch_size = inputs.len / self.in_features;
         var beta: f32 = 0.0;
-        if (self.use_bias) {
+        if (self.bias) |bias| {
             for (0..batch_size) |b| {
-                @memcpy(outputs[b * self.out_features .. (b + 1) * self.out_features], self.bias);
+                @memcpy(outputs[b * self.out_features .. (b + 1) * self.out_features], bias);
             }
             beta = 1.0;
         }
