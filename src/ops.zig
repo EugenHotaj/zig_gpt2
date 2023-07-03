@@ -1,5 +1,5 @@
 const std = @import("std");
-const blas = @cImport(@cInclude("cblas.h"));
+const c = @cImport(@cInclude("cblas.h"));
 
 pub const Linear = struct {
     const Self = @This();
@@ -27,10 +27,10 @@ pub const Linear = struct {
             }
             beta = 1.0;
         }
-        blas.cblas_sgemm(
-            blas.CblasRowMajor,
-            blas.CblasNoTrans,
-            blas.CblasTrans,
+        c.cblas_sgemm(
+            c.CblasRowMajor,
+            c.CblasNoTrans,
+            c.CblasTrans,
             @intCast(i32, batch_size),
             @intCast(i32, self.out_features),
             @intCast(i32, self.in_features),
@@ -222,9 +222,9 @@ pub const CausalSelfAttention = struct {
 pub fn gelu(inputs: []f32) void {
     for (0..inputs.len) |i| {
         const x = inputs[i];
-        const z: f64 = @sqrt(2.0 / std.math.pi);
-        const erf: f64 = std.math.tanh(z * (x + 0.044715 * std.math.pow(f64, x, 3.0)));
-        inputs[i] = @floatCast(f32, 0.5 * x * (1.0 + erf));
+        // Faster, but less accurate gelu.
+        // inputs[i] = x / (1.0 + @exp(-1.702 * x));
+        inputs[i] = 0.5 * x * (1.0 + std.math.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x)));
     }
 }
 
@@ -263,10 +263,10 @@ pub fn scaled_dot_product_attention(
             var q_slice = q[kqvo_offset .. kqvo_offset + seq_len * head_dim];
             var k_slice = k[kqvo_offset .. kqvo_offset + seq_len * head_dim];
             var attn_slice = _attn[attn_offset .. attn_offset + seq_len * seq_len];
-            blas.cblas_sgemm(
-                blas.CblasRowMajor,
-                blas.CblasNoTrans,
-                blas.CblasTrans,
+            c.cblas_sgemm(
+                c.CblasRowMajor,
+                c.CblasNoTrans,
+                c.CblasTrans,
                 @intCast(i32, seq_len),
                 @intCast(i32, seq_len),
                 @intCast(i32, head_dim),
@@ -289,10 +289,10 @@ pub fn scaled_dot_product_attention(
             // Compute attn @ v.
             var v_slice = v[kqvo_offset .. kqvo_offset + seq_len * head_dim];
             var out_slice = outputs[kqvo_offset .. kqvo_offset + seq_len * head_dim];
-            blas.cblas_sgemm(
-                blas.CblasRowMajor,
-                blas.CblasNoTrans,
-                blas.CblasNoTrans,
+            c.cblas_sgemm(
+                c.CblasRowMajor,
+                c.CblasNoTrans,
+                c.CblasNoTrans,
                 @intCast(i32, seq_len),
                 @intCast(i32, head_dim),
                 @intCast(i32, seq_len),
