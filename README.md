@@ -36,7 +36,5 @@ TODOs:
 * Implement token encoding / decoding.
 * ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
 * ✅ Parallelize Linear and CausalSelfAttention operations. (Replaced with BLAS instead.)
-* Replace custom linear algebra kernels with BLAS.
-
-Wishlist:
-* Replace `arrays` with `Vectors`.
+* ✅ Replace custom linear algebra kernels with BLAS.
+* Parallelize softmax and gelu operations.

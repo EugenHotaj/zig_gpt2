@@ -83,14 +83,14 @@ pub const LayerNorm = struct {
         const batch_size = inputs.len / self.n_features;
         for (0..batch_size) |b| {
             // Compute the mean and variance.
-            var mean: f64 = 0.0;
-            var std_: f64 = 0.0;
+            var mean: f32 = 0.0;
+            var std_: f32 = 0.0;
             for (0..self.n_features) |i| {
                 const x = inputs[b * self.n_features + i];
                 mean += x;
                 std_ += x * x;
             }
-            const n = @intToFloat(f64, self.n_features);
+            const n = @intToFloat(f32, self.n_features);
             mean /= n;
             std_ = @sqrt((std_ / n) - (mean * mean) + self.eps);
 
@@ -98,8 +98,7 @@ pub const LayerNorm = struct {
             for (0..self.n_features) |i| {
                 const idx = b * self.n_features + i;
                 const x = inputs[idx];
-                const result = (x - mean) / std_ * self.weight[i] + self.bias[i];
-                inputs[idx] = @floatCast(f32, result);
+                inputs[idx] = (x - mean) / std_ * self.weight[i] + self.bias[i];
             }
         }
     }
@@ -216,28 +215,27 @@ pub const CausalSelfAttention = struct {
     }
 };
 
-/// Computes the Gaussian Error Linear Unit (GELU) activation function on the given inputs
-/// tensor inplace. Copied from the nanogpt repo and identical to OpenAI GPT2 implementation.
+/// Computes Gaussian Error Linear Unit (GELU) activation on the given inputs tensor inplace.
 /// Paper: https://arxiv.org/abs/1606.08415
 pub fn gelu(inputs: []f32) void {
     for (0..inputs.len) |i| {
         const x = inputs[i];
+        inputs[i] = 0.5 * x * (1.0 + std.math.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x)));
         // Faster, but less accurate gelu.
         // inputs[i] = x / (1.0 + @exp(-1.702 * x));
-        inputs[i] = 0.5 * x * (1.0 + std.math.tanh(x * 0.7978845608 * (1.0 + 0.044715 * x * x)));
     }
 }
 
 /// Computes the (stable) softmax of the given inputs vector inplace.
 pub fn softmax(inputs: []f32) void {
     const max = std.mem.max(f32, inputs);
-    var sum: f64 = 0.0;
+    var sum: f32 = 0.0;
     for (0..inputs.len) |i| {
         inputs[i] = @exp(inputs[i] - max);
         sum += inputs[i];
     }
     for (0..inputs.len) |i| {
-        inputs[i] /= @floatCast(f32, sum);
+        inputs[i] /= sum;
     }
 }
 
