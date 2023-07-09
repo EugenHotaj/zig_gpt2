@@ -66,8 +66,8 @@ if not os.path.exists(weights_dir):
 
 
 # Statically create and dump the unicode->bytes encoder.
-def bytes_to_unicode():
-    """Returns list of utf-8 byte and a corresponding list of unicode strings."""
+def unicode_to_bytes():
+    """Returns a dictionary of unicode->byte."""
     bs = (
         list(range(ord("!"), ord("~") + 1))
         + list(range(ord("¡"), ord("¬") + 1))
@@ -86,5 +86,5 @@ def bytes_to_unicode():
     return dict(zip(cs, bs))
 
 
-with open(f"{model}/bytes_encoder.json", "w") as file_:
-    json.dump(bytes_to_unicode(), file_)
+with open(f"{model}/byte_encoder.json", "w") as file_:
+    json.dump(unicode_to_bytes(), file_)
