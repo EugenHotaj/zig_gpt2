@@ -1,6 +1,6 @@
 const std = @import("std");
 const ops = @import("ops.zig");
-const expectTensorsApproxEqual = @import("tests.zig").expectTensorsApproxEqual;
+const bpe = @import("bpe.zig");
 
 const GPTConfig = struct {
     const Self = @This();
@@ -30,6 +30,7 @@ pub const State = struct {
     x: []f32,
     o: []f32,
     logits: []f32,
+    decoded: []u8,
 
     // Intermediate buffers.
     _h: []f32,
@@ -50,6 +51,7 @@ pub const State = struct {
             .x = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
             .o = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
             .logits = try allocator.alloc(f32, batch_size * config.vocab_size),
+            .decoded = try allocator.alloc(u8, batch_size * seq_len * 10),
             ._h = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
             ._3xh = try allocator.alloc(f32, batch_size * seq_len * 3 * config.n_embed),
             ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
@@ -317,38 +319,37 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
     return GPT.init(config, wte, wpe, h, ln_f, lm_head);
 }
 
+pub fn load_encoder(allocator: std.mem.Allocator) !bpe.Encoder {
+    const parsed_encoder = try ops.load_json("models/124M/encoder.json", allocator);
+    const parsed_bytes_encoder = try ops.load_json("models/124M/bytes_encoder.json", allocator);
+    return bpe.Encoder.init(parsed_encoder.object, parsed_bytes_encoder.object, allocator);
+}
+
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
     const max_tokens = 10;
     const temp = 0.8;
-
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
+
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
         &[_]usize{ batch_size, input_tokens + max_tokens },
         usize,
         allocator,
     );
-    const expected = try ops.load_tensor(
-        "models/test/gpt_outputs",
-        &[_]usize{ batch_size, 1, config.vocab_size },
-        f32,
-        allocator,
-    );
     var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator);
-
-    // Ensure that forwarding the model produces the same outputs as PyTorch.
     const gpt = try load_gpt(config, allocator);
-    gpt.forward(input_tokens, inputs[0 .. batch_size * input_tokens], state);
-    try expectTensorsApproxEqual(expected, state.logits);
+    var encoder = try load_encoder(allocator);
+    defer encoder.deinit();
 
-    // Generate.
     try gpt.generate(input_tokens, max_tokens, temp, inputs, state);
-    std.debug.print("{any}\n", .{inputs});
+    encoder.decode(inputs, state.decoded);
+
+    std.debug.print("{s}\n", .{state.decoded});
 }

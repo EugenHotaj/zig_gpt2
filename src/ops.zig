@@ -319,3 +319,9 @@ pub fn load_tensor(path: []const u8, shape: []const usize, comptime dtype: type,
     _ = try fd.readAll(std.mem.sliceAsBytes(tensor));
     return tensor;
 }
+
+pub fn load_json(path: []const u8, allocator: std.mem.Allocator) !std.json.Value {
+    const fd = try std.fs.cwd().openFile(path, .{});
+    const buffer = try fd.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    return std.json.parseFromSliceLeaky(std.json.Value, allocator, buffer, .{});
+}

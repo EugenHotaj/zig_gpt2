@@ -1,10 +1,12 @@
-"""Downloads GPT-2 weights from OpenAI and dumps the tensors in raw binary format.
+"""Downloads GPT-2 checkpoints from OpenAI. 
 
-Weight tensors are transposed so we can easily load them into PyTorch/zig. 
+Weight tensors are transposed and dumped in raw binary so they can easily be loaded into 
+Zig/PyTorch. The unicode->byte encoder is statically generated and dumped to json.
 
-Based on https://github.com/openai/gpt-2/blob/master/download_model.py.
+Based on https://github.com/openai/gpt-2.
 """
 
+import json
 import os
 
 import numpy as np
@@ -43,7 +45,7 @@ if not os.path.exists(model):
                     pbar.update(chunk_size)
 
 
-# Dump the model weights in plain binary if they don't already exist.
+# Dump the model weights in raw binary if they don't already exist.
 weights_dir = f"{model}/raw"
 if not os.path.exists(weights_dir):
     os.makedirs(weights_dir)
@@ -61,3 +63,28 @@ if not os.path.exists(weights_dir):
             with open(f"{weights_dir}/{fname}", "wb") as file_:
                 file_.write(tensor.reshape(-1).tobytes())
             pbar.update(1)
+
+
+# Statically create and dump the unicode->bytes encoder.
+def bytes_to_unicode():
+    """Returns list of utf-8 byte and a corresponding list of unicode strings."""
+    bs = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("¡"), ord("¬") + 1))
+        + list(range(ord("®"), ord("ÿ") + 1))
+    )
+    cs = bs[:]
+    n = 0
+    for b in range(2**8):
+        if b not in bs:
+            bs.append(b)
+            cs.append(2**8 + n)
+            n += 1
+    cs = [chr(n) for n in cs]
+    # !!NOTE!!: Unlike OpenAI's implementation, we dump out unicode->bytes so we don't
+    # have to deal with non-string JSON keys.
+    return dict(zip(cs, bs))
+
+
+with open(f"{model}/bytes_encoder.json", "w") as file_:
+    json.dump(bytes_to_unicode(), file_)
