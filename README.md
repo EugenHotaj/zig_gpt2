@@ -33,7 +33,9 @@ TODOs:
 * ✅ Implement transformer modules: MLP, Transformer block.
 * ✅ Implement the full GPT model.
 * ✅ Implement sampling from the model.
-* Implement token encoding / decoding.
+* Implement token encoding.
+* ✅ Implement token decoding.
+* Stream output as each new token is generated.
 * ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
 * ✅ Parallelize Linear and CausalSelfAttention operations. (Replaced with BLAS instead.)
 * ✅ Replace custom linear algebra kernels with BLAS.
