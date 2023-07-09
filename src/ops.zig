@@ -31,17 +31,17 @@ pub const Linear = struct {
             c.CblasRowMajor,
             c.CblasNoTrans,
             c.CblasTrans,
-            @intCast(i32, batch_size),
-            @intCast(i32, self.out_features),
-            @intCast(i32, self.in_features),
+            @intCast(batch_size),
+            @intCast(self.out_features),
+            @intCast(self.in_features),
             1.0,
             inputs.ptr,
-            @intCast(i32, self.in_features),
+            @intCast(self.in_features),
             self.weight.ptr,
-            @intCast(i32, self.in_features),
+            @intCast(self.in_features),
             beta,
             outputs.ptr,
-            @intCast(i32, self.out_features),
+            @intCast(self.out_features),
         );
     }
 };
@@ -90,7 +90,7 @@ pub const LayerNorm = struct {
                 mean += x;
                 std_ += x * x;
             }
-            const n = @intToFloat(f32, self.n_features);
+            const n: f32 = @floatFromInt(self.n_features);
             mean /= n;
             std_ = @sqrt((std_ / n) - (mean * mean) + self.eps);
 
@@ -265,17 +265,17 @@ pub fn scaled_dot_product_attention(
                 c.CblasRowMajor,
                 c.CblasNoTrans,
                 c.CblasTrans,
-                @intCast(i32, seq_len),
-                @intCast(i32, seq_len),
-                @intCast(i32, head_dim),
-                1.0 / @sqrt(@intToFloat(f32, head_dim)),
+                @intCast(seq_len),
+                @intCast(seq_len),
+                @intCast(head_dim),
+                1.0 / @sqrt(@as(f32, @floatFromInt(head_dim))),
                 q_slice.ptr,
-                @intCast(i32, head_dim),
+                @intCast(head_dim),
                 k_slice.ptr,
-                @intCast(i32, head_dim),
+                @intCast(head_dim),
                 0.0,
                 attn_slice.ptr,
-                @intCast(i32, seq_len),
+                @intCast(seq_len),
             );
 
             // Causally mask and compute attention probabilities, i.e. attn = softmax(attn);
@@ -291,17 +291,17 @@ pub fn scaled_dot_product_attention(
                 c.CblasRowMajor,
                 c.CblasNoTrans,
                 c.CblasNoTrans,
-                @intCast(i32, seq_len),
-                @intCast(i32, head_dim),
-                @intCast(i32, seq_len),
+                @intCast(seq_len),
+                @intCast(head_dim),
+                @intCast(seq_len),
                 1.0,
                 attn_slice.ptr,
-                @intCast(i32, seq_len),
+                @intCast(seq_len),
                 v_slice.ptr,
-                @intCast(i32, head_dim),
+                @intCast(head_dim),
                 0.0,
                 out_slice.ptr,
-                @intCast(i32, head_dim),
+                @intCast(head_dim),
             );
         }
     }

@@ -207,7 +207,7 @@ const GPT = struct {
             }
             ops.softmax(state.logits);
 
-            var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.timestamp()));
+            var rng = std.rand.DefaultPrng.init(@intCast(std.time.timestamp()));
             var random = rng.random();
             inputs[s] = random.weightedIndex(f32, state.logits);
         }
