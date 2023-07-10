@@ -185,34 +185,17 @@ const GPT = struct {
         }
     }
 
-    pub fn generate(
-        self: Self,
-        input_tokens: usize,
-        max_tokens: usize,
-        temp: f32,
-        inputs: []usize,
-        state: State,
-    ) !void {
-        const total_tokens = input_tokens + max_tokens;
-        if (total_tokens > self.config.context_size) {
-            return error.SequenceTooLong;
+    /// Samples the next token and writes the result in inputs[seq_len].
+    /// Assumes batch_size == 1 and inputs.len == seq_len+1.
+    pub fn sample(self: Self, seq_len: usize, temp: f32, inputs: []usize, state: State) void {
+        self.forward(seq_len, inputs[0..seq_len], state);
+        for (0..state.logits.len) |i| {
+            state.logits[i] /= temp;
         }
-        // TODO(eugenhotaj): Remove batch size = 1 restrictions.
-        if ((inputs.len / total_tokens) > 1) {
-            return error.BatchSizeTooBig;
-        }
-
-        for (input_tokens..total_tokens) |s| {
-            self.forward(s, inputs[0..s], state);
-            for (0..state.logits.len) |i| {
-                state.logits[i] /= temp;
-            }
-            ops.softmax(state.logits);
-
-            var rng = std.rand.DefaultPrng.init(@intCast(std.time.timestamp()));
-            var random = rng.random();
-            inputs[s] = random.weightedIndex(f32, state.logits);
-        }
+        ops.softmax(state.logits);
+        var rng = std.rand.DefaultPrng.init(@intCast(std.time.timestamp()));
+        var random = rng.random();
+        inputs[seq_len] = random.weightedIndex(f32, state.logits);
     }
 };
 
@@ -321,14 +304,44 @@ pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
 
 pub fn load_encoder(allocator: std.mem.Allocator) !bpe.Encoder {
     const parsed_encoder = try ops.load_json("models/124M/encoder.json", allocator);
-    const parsed_bytes_encoder = try ops.load_json("models/124M/bytes_encoder.json", allocator);
+    const parsed_bytes_encoder = try ops.load_json("models/124M/byte_encoder.json", allocator);
     return bpe.Encoder.init(parsed_encoder.object, parsed_bytes_encoder.object, allocator);
+}
+
+pub fn generate(
+    gpt: GPT,
+    encoder: bpe.Encoder,
+    temp: f32,
+    input_tokens: usize,
+    max_tokens: usize,
+    inputs: []usize,
+    state: State,
+) !void {
+    const total_tokens = input_tokens + max_tokens;
+    if (total_tokens > gpt.config.context_size) {
+        return error.SequenceTooLong;
+    }
+    // TODO(eugenhotaj): Remove batch size = 1 restrictions.
+    if ((inputs.len / total_tokens) > 1) {
+        return error.BatchSizeTooBig;
+    }
+
+    for (0..total_tokens) |s| {
+        if (s >= input_tokens) {
+            gpt.sample(s, temp, inputs[0..s], state);
+        }
+        if (inputs[s] == 50256) {
+            break;
+        }
+        const decoded_len = encoder.decode(inputs[s .. s + 1], state.decoded);
+        std.debug.print("{s}", .{state.decoded[0..decoded_len]});
+    }
 }
 
 pub fn main() !void {
     const batch_size = 1;
     const input_tokens = 8;
-    const max_tokens = 10;
+    const max_tokens = 100;
     const temp = 0.8;
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
@@ -348,8 +361,13 @@ pub fn main() !void {
     var encoder = try load_encoder(allocator);
     defer encoder.deinit();
 
-    try gpt.generate(input_tokens, max_tokens, temp, inputs, state);
-    encoder.decode(inputs, state.decoded);
-
-    std.debug.print("{s}\n", .{state.decoded});
+    try generate(
+        gpt,
+        encoder,
+        temp,
+        input_tokens,
+        max_tokens,
+        inputs,
+        state,
+    );
 }

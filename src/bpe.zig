@@ -29,7 +29,7 @@ pub const Encoder = struct {
         self.idx_to_token.deinit();
     }
 
-    pub fn decode(self: Self, inputs: []const usize, outputs: []u8) void {
+    pub fn decode(self: Self, inputs: []const usize, outputs: []u8) usize {
         var outputs_len: usize = 0;
         for (inputs) |idx| {
             const token = self.idx_to_token.get(idx).?;
@@ -47,5 +47,6 @@ pub const Encoder = struct {
                 outputs_len += 1;
             }
         }
+        return outputs_len;
     }
 };
