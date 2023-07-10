@@ -28,15 +28,17 @@ generates a bunch of tokens.
 
 ---
 
-TODOs:
+### TODO
+
+Implementation:
 * ✅ Implement basic ops: Embedding, Linear, LayerNorm, GELU, Softmax, CausalSelfAttention.
 * ✅ Implement transformer modules: MLP, Transformer block.
 * ✅ Implement the full GPT model.
 * ✅ Implement sampling from the model.
-* Implement token encoding.
-* ✅ Implement token decoding.
-* Stream output as each new token is generated.
-* ✅ Create central set of buffers and reuse them for each layer, remove `allocators` from existing ops.
-* ✅ Parallelize Linear and CausalSelfAttention operations. (Replaced with BLAS instead.)
+* Implement BPE encoding/decoding.
+    
+Efficiency:
 * ✅ Replace custom linear algebra kernels with BLAS.
-* Parallelize softmax and gelu operations.
+* ✅ Stream output as each new token is generated.
+* ✅ Create central set of memory buffers and reuse them for each layer. No allocations at runtime.
+* Parallelize `softmax` and `gelu` operations.
