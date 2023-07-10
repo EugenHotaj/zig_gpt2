@@ -23,9 +23,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    exe.addIncludePath("lib/OpenBLAS");
-    exe.addObjectFile("lib/OpenBLAS/libopenblas.a");
-    // This declares intent for the executable to be installed into the
+    // If you're not on MacOS, you can download and link OpenBLAS instead.
+    // exe.addIncludePath("lib/OpenBLAS");
+    // exe.addObjectFile("lib/OpenBLAS/libopenblas.a");
+    exe.linkFramework("Accelerate");
+    // // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
     b.installArtifact(exe);

@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @cImport(@cInclude("cblas.h"));
+const c = @cImport(@cInclude("Accelerate/Accelerate.h"));
 
 pub const Linear = struct {
     const Self = @This();
