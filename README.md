@@ -34,3 +34,4 @@ Efficiency:
 * ✅ Stream output as each new token is generated.
 * ✅ Create central set of memory buffers and reuse them for each layer. No allocations at runtime.
 * Parallelize `softmax` and `gelu` operations.
+* Add KV cache.
