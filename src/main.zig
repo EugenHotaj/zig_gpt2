@@ -349,7 +349,6 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
-
     const inputs = try ops.load_tensor(
         "models/test/gpt_inputs",
         &[_]usize{ batch_size, input_tokens + max_tokens },
