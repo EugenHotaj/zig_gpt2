@@ -18,6 +18,18 @@ Build the Zig binary and run it to generate completions on a default prompt:
 zig build run -DOptimize=ReleaseFast
 ```
 
+### How to Test:
+
+Generate test data by forwarding random tensors through PyTorch ops.
+```bash
+python3 generate_test_data.py
+```
+
+Run tests. Verifies Zig ops produce the same output as PyTorch.
+```bash
+zig build test
+```
+
 ---
 
 ### TODO
@@ -33,5 +45,5 @@ Efficiency:
 * ✅ Replace custom linear algebra kernels with BLAS.
 * ✅ Stream output as each new token is generated.
 * ✅ Create central set of memory buffers and reuse them for each layer. No allocations at runtime.
-* Parallelize `softmax` and `gelu` operations.
 * Add KV cache.
+* Parallelize `softmax` and `gelu` operations.
