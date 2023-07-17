@@ -13,9 +13,10 @@ Download the GPT-2 checkpoint from OpenAI.
 python3 download_weights.py
 ```
 
-Build the Zig binary and run it to generate completions on a default prompt:
+Build the Zig binary and run it with a prompt to generate completions:
 ```bash
 zig build run -DOptimize=ReleaseFast
+./zig-out/bin/zig_gpt2 "Marcus Aurelius said"
 ```
 
 ### How to Test:

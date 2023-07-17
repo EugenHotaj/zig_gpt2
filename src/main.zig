@@ -340,7 +340,6 @@ pub fn generate(
 
 pub fn main() !void {
     const batch_size = 1;
-    const input_tokens = 8;
     const max_tokens = 100;
     const temp = 0.8;
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
@@ -350,13 +349,17 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var inputs = try allocator.alloc(usize, input_tokens + max_tokens);
+    var inputs = try allocator.alloc(usize, max_tokens);
     var encoder = try load_encoder(allocator);
     defer encoder.deinit();
-    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator);
+    var state = try State.init(batch_size, max_tokens, config, allocator);
     const gpt = try load_gpt(config, allocator);
 
-    encoder.encode("Marcus Aurelius said thus: ", inputs);
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+    const prompt = args[1];
+
+    const input_tokens = encoder.encode(prompt, inputs);
     try generate(
         gpt,
         encoder,

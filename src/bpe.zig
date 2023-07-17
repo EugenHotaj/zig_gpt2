@@ -56,7 +56,7 @@ pub const Encoder = struct {
         c.regfree(self.regex);
     }
 
-    pub fn encode(self: Self, inputs: []const u8, outputs: []usize) void {
+    pub fn encode(self: Self, inputs: []const u8, outputs: []usize) usize {
         var matches: [1]c.regmatch_t = undefined;
         var token_idx: usize = 0;
         var offset: usize = 0;
@@ -93,6 +93,7 @@ pub const Encoder = struct {
 
             offset = match_eo;
         }
+        return token_idx;
     }
 
     pub fn decode(self: Self, inputs: []const usize, outputs: []u8) usize {
