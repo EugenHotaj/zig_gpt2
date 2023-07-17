@@ -31,9 +31,9 @@ pub const Encoder = struct {
         // Setup regex.
         var slice = try allocator.alignedAlloc(u8, @alignOf(c.regex_t), @sizeOf(c.regex_t));
         const regex = @as(*c.regex_t, @ptrCast(slice.ptr));
-        const contractions = "'s|'t|'re|'ve|'m|'ll|'d|";
-        const letters = "[[:space:]]?[[:alpha:]]+|";
-        const numbers = "[[:space:]]?[[:digit:]]+";
+        const contractions = "'s|'t|'re|'ve|'m|'ll|'d";
+        const letters = "|[[:space:]]?[[:alpha:]]+";
+        const numbers = "|[[:space:]]?[[:digit:]]+";
         const others = "|[[:space:]]?[^[:space:][:alpha:][:digit:]]+";
         // TODO(eugenhotaj): Multiple spaces between tokens are not handled correctly!
         const space = "|[[:space:]]+";
