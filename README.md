@@ -27,7 +27,7 @@ Implementation:
 * ✅ Implement transformer modules: MLP, Transformer block.
 * ✅ Implement the full GPT model.
 * ✅ Implement sampling from the model.
-* Implement BPE encoding/decoding.
+* ✅ Implement BPE encoding/decoding.
     
 Efficiency:
 * ✅ Replace custom linear algebra kernels with BLAS.
