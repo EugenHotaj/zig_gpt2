@@ -222,15 +222,6 @@ outputs = gpt(inputs)
 generated = gpt.generate(inputs, 10).tolist()[0]
 print(encoder.decode(generated))
 
-# fmt: off
-# Zig outputs:
-print(
-    encoder.decode(
-        [35110, 43737, 75, 3754, 531, 4145, 25, 220, 1849, 24426, 32826, 20711, 48628, 2241, 484, 22485, 683, 625]
-    )
-)
-# fmt: on
-
 name_to_tensor = {
     "gpt_inputs": inputs,
     "gpt_outputs": outputs,

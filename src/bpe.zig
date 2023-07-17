@@ -3,11 +3,12 @@ const c = @cImport(@cInclude("regex.h"));
 
 pub const Encoder = struct {
     const Self = @This();
-    const idx_to_token_t = std.hash_map.AutoHashMap(usize, []const u8);
+    const int_to_str_t = std.hash_map.AutoHashMap(usize, []const u8);
 
     token_to_idx: std.json.ObjectMap,
-    idx_to_token: idx_to_token_t,
+    idx_to_token: int_to_str_t,
     unicode_to_byte: std.json.ObjectMap,
+    byte_to_unicode: int_to_str_t,
     regex: *c.regex_t,
 
     pub fn init(
@@ -16,10 +17,15 @@ pub const Encoder = struct {
         allocator: std.mem.Allocator,
     ) !Self {
         // Setup encoders.
-        var idx_to_token = idx_to_token_t.init(allocator);
+        var idx_to_token = int_to_str_t.init(allocator);
         var it = token_to_idx.iterator();
         while (it.next()) |item| {
             try idx_to_token.put(@intCast(item.value_ptr.*.integer), item.key_ptr.*);
+        }
+        var byte_to_unicode = int_to_str_t.init(allocator);
+        it = unicode_to_byte.iterator();
+        while (it.next()) |item| {
+            try byte_to_unicode.put(@intCast(item.value_ptr.*.integer), item.key_ptr.*);
         }
 
         // Setup regex.
@@ -37,25 +43,55 @@ pub const Encoder = struct {
             .token_to_idx = token_to_idx,
             .idx_to_token = idx_to_token,
             .unicode_to_byte = unicode_to_byte,
+            .byte_to_unicode = byte_to_unicode,
             .regex = regex,
         };
     }
 
     pub fn deinit(self: *Self) void {
         self.idx_to_token.deinit();
+        self.token_to_idx.deinit();
+        self.unicode_to_byte.deinit();
+        self.byte_to_unicode.deinit();
         c.regfree(self.regex);
     }
 
-    pub fn encode(self: Self, inputs: []const u8) void {
+    pub fn encode(self: Self, inputs: []const u8, outputs: []usize) void {
         var matches: [1]c.regmatch_t = undefined;
-        var last_idx: usize = 0;
-        while (last_idx < inputs.len) {
-            _ = c.regexec(self.regex, inputs[last_idx..].ptr, matches.len, &matches, 0);
+        var token_idx: usize = 0;
+        var offset: usize = 0;
+        while (offset < inputs.len) {
+            // Match next word.
+            _ = c.regexec(self.regex, inputs[offset..].ptr, matches.len, &matches, 0);
             const match = matches[0];
-            const start_offset = last_idx + @as(usize, @intCast(match.rm_so));
-            last_idx += @intCast(match.rm_eo);
-            const out = inputs[start_offset..last_idx];
-            std.debug.print("{s}\n", .{out});
+            const match_so = offset + @as(usize, @intCast(match.rm_so));
+            const match_eo = offset + @as(usize, @intCast(match.rm_eo));
+
+            // Replace bytes with unicode.
+            var word: [20]u8 = undefined;
+            var word_eo: usize = 0;
+            for (inputs[match_so..match_eo]) |byte| {
+                for (self.byte_to_unicode.get(byte).?) |code| {
+                    word[word_eo] = code;
+                    word_eo += 1;
+                }
+            }
+
+            // Tokenize word.
+            var token_so: usize = 0;
+            var token_eo = word_eo;
+            while (token_so < token_eo) {
+                if (self.token_to_idx.contains(word[token_so..token_eo])) {
+                    outputs[token_idx] = @intCast(self.token_to_idx.get(word[token_so..token_eo]).?.integer);
+                    token_so = token_eo;
+                    token_eo = word_eo;
+                    token_idx += 1;
+                } else {
+                    token_eo -= 1;
+                }
+            }
+
+            offset = match_eo;
         }
     }
 

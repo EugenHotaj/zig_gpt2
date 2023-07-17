@@ -349,17 +349,14 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
-    const inputs = try ops.load_tensor(
-        "models/test/gpt_inputs",
-        &[_]usize{ batch_size, input_tokens + max_tokens },
-        usize,
-        allocator,
-    );
-    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator);
-    const gpt = try load_gpt(config, allocator);
+
+    var inputs = try allocator.alloc(usize, input_tokens + max_tokens);
     var encoder = try load_encoder(allocator);
     defer encoder.deinit();
+    var state = try State.init(batch_size, input_tokens + max_tokens, config, allocator);
+    const gpt = try load_gpt(config, allocator);
 
+    encoder.encode("Marcus Aurelius said thus: ", inputs);
     try generate(
         gpt,
         encoder,
