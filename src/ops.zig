@@ -135,13 +135,14 @@ pub const CausalSelfAttention = struct {
         _v: []f32,
         _attn: []f32,
     ) void {
+        const t_shape = [3]usize{ seq_len, self.n_heads, self.head_dim };
         self.c_attn.forward(inputs, _qkv);
         self.split_qkv(seq_len, _qkv, 0, outputs);
-        self.transpose(seq_len, outputs, _q);
+        Self.transpose(t_shape, outputs, _q);
         self.split_qkv(seq_len, _qkv, 1, outputs);
-        self.transpose(seq_len, outputs, _k);
+        Self.transpose(t_shape, outputs, _k);
         self.split_qkv(seq_len, _qkv, 2, outputs);
-        self.transpose(seq_len, outputs, _v);
+        Self.transpose(t_shape, outputs, _v);
         scaled_dot_product_attention(
             _q,
             _k,
@@ -153,7 +154,7 @@ pub const CausalSelfAttention = struct {
             _attn,
         );
         // Hack: Store untranspose requst in q so we don't need to keep another buffer.
-        self.untranspose(seq_len, outputs, _q);
+        Self.transpose([3]usize{ self.n_heads, seq_len, self.head_dim }, outputs, _q);
         self.c_proj.forward(_q, outputs);
     }
 
@@ -180,34 +181,20 @@ pub const CausalSelfAttention = struct {
         }
     }
 
-    /// Transposes (batch_size, seq_len, n_heads, head_dim) -> (batch_size, n_heads, seq_len, head_dim).
-    pub fn transpose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
-        const batch_size = inputs.len / (seq_len * self.n_embed);
+    // Transposes (b, t, n, h) --> (b, n, t, h) where shape contains the sizes of (t, n, h).
+    pub fn transpose(shape: [3]usize, inputs: []const f32, outputs: []f32) void {
+        const seq_len = shape[0];
+        const n_heads = shape[1];
+        const head_dim = shape[2];
+        const batch_size = inputs.len / (seq_len * n_heads * head_dim);
         for (0..batch_size) |b| {
-            for (0..self.n_heads) |h| {
-                for (0..seq_len) |r| {
-                    const out_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
-                    const in_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
+            for (0..n_heads) |h| {
+                for (0..seq_len) |s| {
+                    const in_offset = (b * seq_len * n_heads * head_dim) + (s * n_heads * head_dim) + (h * head_dim);
+                    const out_offset = (b * seq_len * n_heads * head_dim) + (h * seq_len * head_dim) + (s * head_dim);
                     @memcpy(
-                        outputs[out_offset .. out_offset + self.head_dim],
-                        inputs[in_offset .. in_offset + self.head_dim],
-                    );
-                }
-            }
-        }
-    }
-
-    /// Transposes (batch_size, n_heads, seq_len, head_dim) -> (batch_size, seq_len, n_heads, head_dim).
-    pub fn untranspose(self: Self, seq_len: usize, inputs: []const f32, outputs: []f32) void {
-        const batch_size = inputs.len / (seq_len * self.n_embed);
-        for (0..batch_size) |b| {
-            for (0..seq_len) |r| {
-                for (0..self.n_heads) |h| {
-                    const out_offset = (b * seq_len * self.n_embed) + (r * self.n_embed) + (h * self.head_dim);
-                    const in_offset = (b * seq_len * self.n_embed) + (h * seq_len * self.head_dim) + (r * self.head_dim);
-                    @memcpy(
-                        outputs[out_offset .. out_offset + self.head_dim],
-                        inputs[in_offset .. in_offset + self.head_dim],
+                        outputs[out_offset .. out_offset + head_dim],
+                        inputs[in_offset .. in_offset + head_dim],
                     );
                 }
             }

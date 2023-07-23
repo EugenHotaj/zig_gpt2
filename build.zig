@@ -66,8 +66,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    unit_tests.addIncludePath("lib/OpenBLAS");
-    unit_tests.addObjectFile("lib/OpenBLAS/libopenblas.a");
+    // Link BLAS. If you're not on MacOS, you need to download and build OpenBLAS and uncomment the
+    // lines below.
+    unit_tests.linkFramework("Accelerate");
+    // unit_tests.addIncludePath("lib/OpenBLAS");
+    // unit_tests.addObjectFile("lib/OpenBLAS/libopenblas.a");
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 

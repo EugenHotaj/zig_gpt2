@@ -231,10 +231,13 @@ test "CausalSelfAttention.transpose" {
     );
     defer allocator.free(expected);
 
-    const fake_attn = ops.CausalSelfAttention.init(n_heads, n_embed, undefined, undefined);
     const actual = try allocator.alloc(f32, batch_size * seq_len * n_embed);
     defer allocator.free(actual);
-    fake_attn.transpose(seq_len, inputs, actual);
+    ops.CausalSelfAttention.transpose(
+        [3]usize{ seq_len, n_heads, head_dim },
+        inputs,
+        actual,
+    );
 
     try expectTensorsApproxEqual(expected, actual);
 }
