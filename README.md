@@ -1,5 +1,5 @@
 # zig_gpt2
-GPT-2 inference engine written in Zig. Generation time: ~34ms per token.
+GPT-2 inference engine written in Zig. Generation time: ~28ms per token.
 
 ### Features:
 * No third-party dependencies besides BLAS (Accelerate or OpenBLAS).
