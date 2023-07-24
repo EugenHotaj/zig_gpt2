@@ -22,14 +22,13 @@ const GPTConfig = struct {
     }
 };
 
+/// Structure which maintains state which is shared across all GPT layers.
 pub const State = struct {
     const Self = @This();
 
     pos_emb: []f32,
     x: []f32,
     o: []f32,
-    k_cache: []f32,
-    v_cache: []f32,
     logits: []f32,
     decoded: []u8,
 
@@ -42,7 +41,6 @@ pub const State = struct {
     _v: []f32,
     _attn: []f32,
 
-    config: GPTConfig,
     allocator: std.mem.Allocator,
 
     pub fn init(config: GPTConfig, allocator: std.mem.Allocator) !Self {
@@ -50,8 +48,6 @@ pub const State = struct {
             .pos_emb = try allocator.alloc(f32, 1 * config.n_embed),
             .x = try allocator.alloc(f32, 1 * config.n_embed),
             .o = try allocator.alloc(f32, 1 * config.n_embed),
-            .k_cache = try allocator.alloc(f32, config.n_layer * config.context_size * config.n_embed),
-            .v_cache = try allocator.alloc(f32, config.n_layer * config.context_size * config.n_embed),
             .logits = try allocator.alloc(f32, config.vocab_size),
             .decoded = try allocator.alloc(u8, 20),
 
@@ -63,7 +59,6 @@ pub const State = struct {
             ._v = try allocator.alloc(f32, config.context_size * config.n_embed),
             ._attn = try allocator.alloc(f32, 1 * config.context_size),
 
-            .config = config,
             .allocator = allocator,
         };
     }
@@ -90,26 +85,38 @@ const MLP = struct {
 const Block = struct {
     const Self = @This();
 
+    n_embed: usize,
     ln_1: ops.LayerNorm,
     attn: ops.CausalSelfAttention,
     ln_2: ops.LayerNorm,
     mlp: MLP,
+    k_cache: []f32,
+    v_cache: []f32,
 
-    pub fn init(ln_1: ops.LayerNorm, attn: ops.CausalSelfAttention, ln_2: ops.LayerNorm, mlp: MLP) Self {
-        return Self{ .ln_1 = ln_1, .attn = attn, .ln_2 = ln_2, .mlp = mlp };
+    pub fn init(
+        n_embed: usize,
+        ln_1: ops.LayerNorm,
+        attn: ops.CausalSelfAttention,
+        ln_2: ops.LayerNorm,
+        mlp: MLP,
+        k_cache: []f32,
+        v_cache: []f32,
+    ) Self {
+        return Self{
+            .n_embed = n_embed,
+            .ln_1 = ln_1,
+            .attn = attn,
+            .ln_2 = ln_2,
+            .mlp = mlp,
+            .k_cache = k_cache,
+            .v_cache = v_cache,
+        };
     }
 
     /// Computes the forward pass and writes the result to both state.x and state.o. This
     /// enables sequentially calling multiple Block.forwards() in a row without having to copy
     /// memory.
-    pub fn forward(
-        self: Self,
-        seq_len: usize,
-        inputs: []const f32,
-        k_cache: []f32,
-        v_cache: []f32,
-        state: State,
-    ) void {
+    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, state: State) void {
         // Create a copy of x for residual computation.
         @memcpy(state._h, inputs);
 
@@ -117,13 +124,13 @@ const Block = struct {
         self.attn.forward(
             seq_len,
             state._h,
-            k_cache[0 .. seq_len * state.config.n_embed],
-            v_cache[0 .. seq_len * state.config.n_embed],
+            self.k_cache[0 .. seq_len * self.n_embed],
+            self.v_cache[0 .. seq_len * self.n_embed],
             state.o,
             state._qkv,
             state._q,
-            state._k[0 .. seq_len * state.config.n_embed],
-            state._v[0 .. seq_len * state.config.n_embed],
+            state._k[0 .. seq_len * self.n_embed],
+            state._v[0 .. seq_len * self.n_embed],
             state._attn[0..seq_len],
         );
         for (0..state.o) |i| {
@@ -177,14 +184,7 @@ const GPT = struct {
 
         // Forward the transformer.
         for (0..self.h.len) |i| {
-            const kv_cache_size = self.config.context_size * self.config.n_embed;
-            self.h[i].forward(
-                seq_len,
-                state.x,
-                state.k_cache[i * kv_cache_size .. (i + 1) * kv_cache_size],
-                state.v_cache[i * kv_cache_size .. (i + 1) * kv_cache_size],
-                state,
-            );
+            self.h[i].forward(seq_len, state.x, state);
         }
         self.ln_f.forward(state.x);
 
@@ -192,7 +192,7 @@ const GPT = struct {
         self.lm_head.forward(state.x, state.logits);
     }
 
-    /// Samples the next token and writes the result in inputs[seq_len].
+    /// Samples the next token.
     pub fn sample(self: Self, seq_len: usize, temp: f32, token: usize, state: State) usize {
         self.forward(seq_len, token, state);
         for (0..state.logits.len) |i| {
@@ -293,7 +293,10 @@ pub fn load_block(layer_idx: usize, config: GPTConfig, allocator: std.mem.Alloca
 
     const attn = ops.CausalSelfAttention.init(config.n_heads, config.n_embed, c_attn, c_proj);
     const mlp = MLP.init(c_fc, mlp_c_proj);
-    return Block.init(ln_1, attn, ln_2, mlp);
+    const k_cache = try allocator.alloc(f32, config.context_size * config.n_embed);
+    const v_cache = try allocator.alloc(f32, config.context_size * config.n_embed);
+
+    return Block.init(config.n_embed, ln_1, attn, ln_2, mlp, k_cache, v_cache);
 }
 
 pub fn load_gpt(config: GPTConfig, allocator: std.mem.Allocator) !GPT {
