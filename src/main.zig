@@ -175,7 +175,7 @@ const GPT = struct {
     }
 
     /// Computes the forward pass and writes the result in state.logits.
-    pub fn forward(self: Self, seq_len: usize, token: usize, state: State) void {
+    pub fn forward(self: Self, seq_len: usize, token: usize, compute_logits: bool, state: State) void {
         self.wpe.forward(&[1]usize{seq_len - 1}, state.pos_emb);
         self.wte.forward(&[1]usize{token}, state.x);
         for (0..self.config.n_embed) |i| {
@@ -189,12 +189,14 @@ const GPT = struct {
         self.ln_f.forward(state.x);
 
         // Compute logits.
-        self.lm_head.forward(state.x, state.logits);
+        if (compute_logits) {
+            self.lm_head.forward(state.x, state.logits);
+        }
     }
 
     /// Samples the next token.
     pub fn sample(self: Self, seq_len: usize, temp: f32, token: usize, state: State) usize {
-        self.forward(seq_len, token, state);
+        self.forward(seq_len, token, true, state);
         for (0..state.logits.len) |i| {
             state.logits[i] /= temp;
         }
@@ -329,7 +331,7 @@ pub fn generate(
         if (s < inputs.len) {
             // Fill up KV cache.
             token = inputs[s];
-            gpt.forward(s + 1, token, state);
+            gpt.forward(s + 1, token, false, state);
         } else {
             // Generate.
             token = gpt.sample(s + 1, temp, token, state);
