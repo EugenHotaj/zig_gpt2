@@ -1,10 +1,10 @@
 # zig_gpt2
-GPT-2 inference engine written in Zig. 
+GPT-2 inference engine written in Zig. Generation time: ~34ms per token.
 
 ### Features:
 * No third-party dependencies besides BLAS (Accelerate or OpenBLAS).
 * No memory allocations at runtime.
-* Can run [NanoGPT](https://github.com/karpathy/nanoGPT). 
+* Can run [NanoGPT](https://github.com/karpathy/nanoGPT).
 
 ### How to Run:
 
