@@ -79,7 +79,7 @@ name_to_tensor.update(
 
 
 # Generate causal self attention.
-batch_size, seq_len, n_head, head_dim = 3, 5, 12, 64
+batch_size, seq_len, n_head, head_dim = 1, 5, 12, 64
 n_embed = n_head * head_dim
 
 # Generate transpose intermediaries.
@@ -111,9 +111,9 @@ q, k, v = outputs.split(n_embed, dim=2)
 q = q.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
 k = k.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
 v = v.view(batch_size, seq_len, n_head, n_embed // n_head).transpose(1, 2)
-mask = torch.tril(torch.ones(5, 5).view(1, 1, 5, 5))
+mask = torch.tril(torch.ones(seq_len, seq_len).view(1, 1, seq_len, seq_len))
 attn = q @ k.transpose(-2, -1) / math.sqrt(k.size(-1))
-attn = attn.masked_fill(mask[:, :, :5, :5] == 0, float("-inf"))
+attn = attn.masked_fill(mask[:, :, :seq_len, :seq_len] == 0, float("-inf"))
 attn = F.softmax(attn, dim=-1)
 outputs = attn @ v
 name_to_tensor.update({"sdpa_q": q, "sdpa_k": k, "sdpa_v": v, "sdpa_outputs": outputs})

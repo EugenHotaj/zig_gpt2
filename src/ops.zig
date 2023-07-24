@@ -123,10 +123,15 @@ pub const CausalSelfAttention = struct {
         };
     }
 
+    // TODO(eugenhotaj): Remove the batch_size == 1 restriction. We impose this restriction right
+    // now because extending the KV cache for larger batch sizes is a bit tedious. It involves
+    // expanding the sequence dimension which requires copying and moving around memory.
     pub fn forward(
         self: Self,
         seq_len: usize,
         inputs: []const f32,
+        k_cache: []f32,
+        v_cache: []f32,
         outputs: []f32,
         // Parameters below are intermediate buffers used inside the function.
         _qkv: []f32,
@@ -135,14 +140,23 @@ pub const CausalSelfAttention = struct {
         _v: []f32,
         _attn: []f32,
     ) void {
-        const t_shape = [3]usize{ seq_len, self.n_heads, self.head_dim };
         self.c_attn.forward(inputs, _qkv);
-        self.split_qkv(seq_len, _qkv, 0, outputs);
-        Self.transpose(t_shape, outputs, _q);
-        self.split_qkv(seq_len, _qkv, 1, outputs);
-        Self.transpose(t_shape, outputs, _k);
-        self.split_qkv(seq_len, _qkv, 2, outputs);
-        Self.transpose(t_shape, outputs, _v);
+
+        // Q: 1 * n_embed.
+        self.split_qkv(1, _qkv, 0, outputs);
+        Self.transpose([3]usize{ 1, self.n_heads, self.head_dim }, outputs, _q);
+
+        const t_shape = [3]usize{ seq_len, self.n_heads, self.head_dim };
+        // Extend K: 1 * n_embed --> seq_len * n_embed.
+        self.split_qkv(1, _qkv, 1, outputs);
+        @memcpy(k_cache[(seq_len - 1) * self.n_embed .. seq_len * self.n_embed], outputs);
+        Self.transpose(t_shape, k_cache, _k);
+
+        // Extend V: 1 * n_embed --> seq_len * n_embed.
+        self.split_qkv(1, _qkv, 2, outputs);
+        @memcpy(v_cache[(seq_len - 1) * self.n_embed .. seq_len * self.n_embed], outputs);
+        Self.transpose(t_shape, v_cache, _v);
+
         scaled_dot_product_attention(
             _q,
             _k,
@@ -153,12 +167,12 @@ pub const CausalSelfAttention = struct {
             outputs,
             _attn,
         );
-        // Hack: Store untranspose requst in q so we don't need to keep another buffer.
-        Self.transpose([3]usize{ self.n_heads, seq_len, self.head_dim }, outputs, _q);
+        // Hack: Store untranspose in _q so we don't need to keep another buffer.
+        Self.transpose([3]usize{ self.n_heads, 1, self.head_dim }, outputs, _q);
         self.c_proj.forward(_q, outputs);
     }
 
-    /// Splits (batch_size, seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
+    /// Splits (seq_len, 3 * n_embed) -> (batch_size, n_heads, n_embed). The split_index
     /// determines which split to return.
     pub fn split_qkv(
         self: Self,
@@ -226,8 +240,12 @@ pub fn softmax(inputs: []f32) void {
     }
 }
 
-// TODO(eugenhotaj): Expose whether to apply causal attention masking as an argument.
-/// Computes the causal self attention of the given q, k, v tensors.
+/// Computes the scaled dot product attention.
+///
+/// The dimensions of the input tensors are expected to be:
+///     q: batch_size * n_heads * 1 * head_dim
+///     k: batch_size * n_heads * seq_len * head_dim
+///     v: batch_size * n_heads * seq_len * head_dim
 pub fn scaled_dot_product_attention(
     q: []const f32,
     k: []const f32,
@@ -241,18 +259,17 @@ pub fn scaled_dot_product_attention(
     const batch_size = k.len / (n_heads * seq_len * head_dim);
     for (0..batch_size) |b| {
         for (0..n_heads) |h| {
-            const kqvo_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
-            const attn_offset = (b * n_heads * seq_len * seq_len) + (h * seq_len * seq_len);
+            const qo_offset = (b * n_heads * 1 * head_dim) + (h * 1 * head_dim);
+            const kv_offset = (b * n_heads * seq_len * head_dim) + (h * seq_len * head_dim);
 
-            // Compute attention logits, i.e. attn = (q @ k.T) / sqrt(head_dim).
-            var q_slice = q[kqvo_offset .. kqvo_offset + seq_len * head_dim];
-            var k_slice = k[kqvo_offset .. kqvo_offset + seq_len * head_dim];
-            var attn_slice = _attn[attn_offset .. attn_offset + seq_len * seq_len];
+            // Compute attention logits, i.e. attn = softmax((q @ k.T) / sqrt(head_dim)).
+            var q_slice = q[qo_offset .. qo_offset + 1 * head_dim];
+            var k_slice = k[kv_offset .. kv_offset + seq_len * head_dim];
             c.cblas_sgemm(
                 c.CblasRowMajor,
                 c.CblasNoTrans,
                 c.CblasTrans,
-                @intCast(seq_len),
+                1,
                 @intCast(seq_len),
                 @intCast(head_dim),
                 1.0 / @sqrt(@as(f32, @floatFromInt(head_dim))),
@@ -261,28 +278,23 @@ pub fn scaled_dot_product_attention(
                 k_slice.ptr,
                 @intCast(head_dim),
                 0.0,
-                attn_slice.ptr,
+                _attn.ptr,
                 @intCast(seq_len),
             );
-
-            // Causally mask and compute attention probabilities, i.e. attn = softmax(attn);
-            for (0..seq_len) |r| {
-                @memset(attn_slice[r * seq_len + r + 1 .. (r + 1) * seq_len], -std.math.inf(f32));
-                softmax(attn_slice[r * seq_len .. (r + 1) * seq_len]);
-            }
+            softmax(_attn);
 
             // Compute attn @ v.
-            var v_slice = v[kqvo_offset .. kqvo_offset + seq_len * head_dim];
-            var out_slice = outputs[kqvo_offset .. kqvo_offset + seq_len * head_dim];
+            var v_slice = v[kv_offset .. kv_offset + seq_len * head_dim];
+            var out_slice = outputs[qo_offset .. qo_offset + 1 * head_dim];
             c.cblas_sgemm(
                 c.CblasRowMajor,
                 c.CblasNoTrans,
                 c.CblasNoTrans,
-                @intCast(seq_len),
+                1,
                 @intCast(head_dim),
                 @intCast(seq_len),
                 1.0,
-                attn_slice.ptr,
+                _attn.ptr,
                 @intCast(seq_len),
                 v_slice.ptr,
                 @intCast(head_dim),

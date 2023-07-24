@@ -25,37 +25,45 @@ const GPTConfig = struct {
 pub const State = struct {
     const Self = @This();
 
-    pos: []usize,
     pos_emb: []f32,
     x: []f32,
     o: []f32,
+    k_cache: []f32,
+    v_cache: []f32,
     logits: []f32,
     decoded: []u8,
 
     // Intermediate buffers.
     _h: []f32,
-    _3xh: []f32,
     _4xh: []f32,
+    _qkv: []f32,
+    _q: []f32,
+    _k: []f32,
+    _v: []f32,
     _attn: []f32,
 
+    config: GPTConfig,
     allocator: std.mem.Allocator,
 
-    pub fn init(batch_size: usize, seq_len: usize, config: GPTConfig, allocator: std.mem.Allocator) !Self {
-        var pos = try allocator.alloc(usize, seq_len);
-        for (0..seq_len) |i| {
-            pos[i] = i;
-        }
+    pub fn init(config: GPTConfig, allocator: std.mem.Allocator) !Self {
         return Self{
-            .pos = pos,
-            .pos_emb = try allocator.alloc(f32, seq_len * config.n_embed),
-            .x = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
-            .o = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
-            .logits = try allocator.alloc(f32, batch_size * config.vocab_size),
-            .decoded = try allocator.alloc(u8, batch_size * seq_len * 10),
-            ._h = try allocator.alloc(f32, batch_size * seq_len * config.n_embed),
-            ._3xh = try allocator.alloc(f32, batch_size * seq_len * 3 * config.n_embed),
-            ._4xh = try allocator.alloc(f32, batch_size * seq_len * 4 * config.n_embed),
-            ._attn = try allocator.alloc(f32, batch_size * config.n_heads * seq_len * seq_len),
+            .pos_emb = try allocator.alloc(f32, 1 * config.n_embed),
+            .x = try allocator.alloc(f32, 1 * config.n_embed),
+            .o = try allocator.alloc(f32, 1 * config.n_embed),
+            .k_cache = try allocator.alloc(f32, config.n_layer * config.context_size * config.n_embed),
+            .v_cache = try allocator.alloc(f32, config.n_layer * config.context_size * config.n_embed),
+            .logits = try allocator.alloc(f32, config.vocab_size),
+            .decoded = try allocator.alloc(u8, 20),
+
+            ._h = try allocator.alloc(f32, 1 * config.n_embed),
+            ._4xh = try allocator.alloc(f32, 1 * 4 * config.n_embed),
+            ._qkv = try allocator.alloc(f32, 1 * 3 * config.n_embed),
+            ._q = try allocator.alloc(f32, 1 * config.n_embed),
+            ._k = try allocator.alloc(f32, config.context_size * config.n_embed),
+            ._v = try allocator.alloc(f32, config.context_size * config.n_embed),
+            ._attn = try allocator.alloc(f32, 1 * config.context_size),
+
+            .config = config,
             .allocator = allocator,
         };
     }
@@ -94,21 +102,29 @@ const Block = struct {
     /// Computes the forward pass and writes the result to both state.x and state.o. This
     /// enables sequentially calling multiple Block.forwards() in a row without having to copy
     /// memory.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const f32, state: State) void {
+    pub fn forward(
+        self: Self,
+        seq_len: usize,
+        inputs: []const f32,
+        k_cache: []f32,
+        v_cache: []f32,
+        state: State,
+    ) void {
         // Create a copy of x for residual computation.
-        std.mem.copyForwards(f32, state._h, inputs);
+        @memcpy(state._h, inputs);
 
         self.ln_1.forward(state._h);
         self.attn.forward(
             seq_len,
             state._h,
+            k_cache[0 .. seq_len * state.config.n_embed],
+            v_cache[0 .. seq_len * state.config.n_embed],
             state.o,
-            state._3xh,
-            // Using _4xh as temporary buffer since _q, _k, _v are thrown away.
-            state._4xh[0..inputs.len],
-            state._4xh[inputs.len .. 2 * inputs.len],
-            state._4xh[2 * inputs.len .. 3 * inputs.len],
-            state._attn,
+            state._qkv,
+            state._q,
+            state._k[0 .. seq_len * state.config.n_embed],
+            state._v[0 .. seq_len * state.config.n_embed],
+            state._attn[0..seq_len],
         );
         for (0..state.o) |i| {
             state._h[i] = state.o[i] + inputs[i];
@@ -152,50 +168,40 @@ const GPT = struct {
     }
 
     /// Computes the forward pass and writes the result in state.logits.
-    pub fn forward(self: Self, seq_len: usize, inputs: []const usize, state: State) void {
-        const batch_size = inputs.len / seq_len;
-
-        // Compute embeddings (token + positional).
-        self.wpe.forward(state.pos, state.pos_emb);
-        self.wte.forward(inputs, state.x);
-        for (0..batch_size) |b| {
-            for (0..seq_len) |s| {
-                for (0..self.config.n_embed) |i| {
-                    const batch_offset = (b * seq_len * self.config.n_embed);
-                    const seq_offset = (s * self.config.n_embed);
-                    state.x[batch_offset + seq_offset + i] += state.pos_emb[seq_offset + i];
-                }
-            }
+    pub fn forward(self: Self, seq_len: usize, token: usize, state: State) void {
+        self.wpe.forward(&[1]usize{seq_len - 1}, state.pos_emb);
+        self.wte.forward(&[1]usize{token}, state.x);
+        for (0..self.config.n_embed) |i| {
+            state.x[i] += state.pos_emb[i];
         }
 
         // Forward the transformer.
         for (0..self.h.len) |i| {
-            self.h[i].forward(seq_len, state.x, state);
+            const kv_cache_size = self.config.context_size * self.config.n_embed;
+            self.h[i].forward(
+                seq_len,
+                state.x,
+                state.k_cache[i * kv_cache_size .. (i + 1) * kv_cache_size],
+                state.v_cache[i * kv_cache_size .. (i + 1) * kv_cache_size],
+                state,
+            );
         }
         self.ln_f.forward(state.x);
 
         // Compute logits.
-        // Mini-optimization: Only forward the lm_head on the very last position.
-        for (0..batch_size) |b| {
-            const in_offset = b * seq_len * self.config.n_embed;
-            self.lm_head.forward(
-                state.x[in_offset + (seq_len - 1) * self.config.n_embed .. in_offset + seq_len * self.config.n_embed],
-                state.logits[b * self.config.vocab_size .. (b + 1) * self.config.vocab_size],
-            );
-        }
+        self.lm_head.forward(state.x, state.logits);
     }
 
     /// Samples the next token and writes the result in inputs[seq_len].
-    /// Assumes batch_size == 1 and inputs.len == seq_len+1.
-    pub fn sample(self: Self, seq_len: usize, temp: f32, inputs: []usize, state: State) void {
-        self.forward(seq_len, inputs[0..seq_len], state);
+    pub fn sample(self: Self, seq_len: usize, temp: f32, token: usize, state: State) usize {
+        self.forward(seq_len, token, state);
         for (0..state.logits.len) |i| {
             state.logits[i] /= temp;
         }
         ops.softmax(state.logits);
         var rng = std.rand.DefaultPrng.init(@intCast(std.time.timestamp()));
         var random = rng.random();
-        inputs[seq_len] = random.weightedIndex(f32, state.logits);
+        return random.weightedIndex(f32, state.logits);
     }
 };
 
@@ -312,35 +318,25 @@ pub fn generate(
     gpt: GPT,
     encoder: bpe.Encoder,
     temp: f32,
-    input_tokens: usize,
-    max_tokens: usize,
     inputs: []usize,
     state: State,
-) !void {
-    const total_tokens = input_tokens + max_tokens;
-    if (total_tokens > gpt.config.context_size) {
-        return error.SequenceTooLong;
-    }
-    // TODO(eugenhotaj): Remove batch size = 1 restrictions.
-    if ((inputs.len / total_tokens) > 1) {
-        return error.BatchSizeTooBig;
-    }
-
-    for (0..total_tokens) |s| {
-        if (s >= input_tokens) {
-            gpt.sample(s, temp, inputs[0..s], state);
+) void {
+    var token: usize = undefined;
+    for (0..gpt.config.context_size) |s| {
+        if (s < inputs.len) {
+            // Fill up KV cache.
+            token = inputs[s];
+            gpt.forward(s + 1, token, state);
+        } else {
+            // Generate.
+            token = gpt.sample(s + 1, temp, token, state);
         }
-        if (inputs[s] == 50256) {
-            break;
-        }
-        const decoded_len = encoder.decode(inputs[s .. s + 1], state.decoded);
+        const decoded_len = encoder.decode(&[_]usize{token}, state.decoded);
         std.debug.print("{s}", .{state.decoded[0..decoded_len]});
     }
 }
 
 pub fn main() !void {
-    const batch_size = 1;
-    const max_tokens = 100;
     const temp = 0.8;
     const config = GPTConfig.init(50257, 1024, 12, 12, 768);
 
@@ -349,10 +345,10 @@ pub fn main() !void {
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var inputs = try allocator.alloc(usize, max_tokens);
+    var inputs = try allocator.alloc(usize, config.context_size);
     var encoder = try load_encoder(allocator);
     defer encoder.deinit();
-    var state = try State.init(batch_size, max_tokens, config, allocator);
+    var state = try State.init(config, allocator);
     const gpt = try load_gpt(config, allocator);
 
     const args = try std.process.argsAlloc(allocator);
@@ -360,13 +356,11 @@ pub fn main() !void {
     const prompt = args[1];
 
     const input_tokens = encoder.encode(prompt, inputs);
-    try generate(
+    generate(
         gpt,
         encoder,
         temp,
-        input_tokens,
-        max_tokens,
-        inputs,
+        inputs[0..input_tokens],
         state,
     );
 }

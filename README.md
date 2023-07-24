@@ -46,5 +46,5 @@ Efficiency:
 * ✅ Replace custom linear algebra kernels with BLAS.
 * ✅ Stream output as each new token is generated.
 * ✅ Create central set of memory buffers and reuse them for each layer. No allocations at runtime.
-* Add KV cache.
+* ✅ Add KV cache.
 * Parallelize `softmax` and `gelu` operations.
